@@ -8,8 +8,8 @@ sign-in and the tracker's JSON API are in place, and the catalogue is seeded
 from `seed-data.csv`. Anything outside `/api/` returns a plain-text health
 response that also reports whether you are signed in.
 
-Applied to **dev only**. Production still has an empty database and is running
-the earlier scaffold; see [Promoting to production](#promoting-to-production).
+Both environments are live and identical: schema migrated, catalogue seeded
+(117 items), Google sign-in deployed. Neither has any registered users yet.
 
 ## Stack
 
@@ -200,13 +200,32 @@ secret, set per environment with `wrangler secret put`, and is never committed.
 
 ## Promoting to production
 
-Nothing in Phase 2 has been applied to production. When you are ready:
+Production is already migrated, seeded and deployed. The order matters when
+rebuilding from scratch — migrate and seed *before* deploying, so the Worker is
+never live against a database with no tables:
 
 ```bash
 npx wrangler d1 migrations apply mcu-tracker-prod --env production --remote
+npx wrangler d1 execute mcu-tracker-prod --env production --remote --command "SELECT COUNT(*) FROM items"
 npx wrangler d1 execute mcu-tracker-prod --env production --remote --file seed/items.sql
 npm run deploy:prod
 ```
+
+A deploy takes a few seconds to reach every colo. During that window some edge
+locations still answer with the previous version, so treat an unexpected
+response immediately after deploying as propagation lag and re-check before
+diagnosing it as a bug.
+
+### Access posture
+
+`mcu.kjserver.dev` has **no Cloudflare Access in front of it** — the OAuth flow
+is the only gate, which is what an unlimited public audience requires. Access
+must stay off this hostname: it would intercept Google's redirect back and
+break sign-in.
+
+`mcu-dev.kjserver.dev` is still behind Access at the time of writing, which
+does not affect production but does mean dev needs an Access session (or a
+bypass) to test sign-in.
 
 ## Local development
 
