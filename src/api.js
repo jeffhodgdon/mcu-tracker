@@ -44,6 +44,24 @@ export function json(data, status = 200, headers = {}) {
   });
 }
 
+/**
+ * Marks a response as belonging to one specific signed-in user.
+ *
+ * Nothing caches these today, but a zone-level "cache everything" rule added
+ * later would otherwise be free to store one user's watch list and serve it to
+ * the next caller. `private` bars shared caches outright and `no-store` stops
+ * even the browser writing it to disk, so the guarantee does not depend on the
+ * zone's cache configuration staying as it is.
+ *
+ * Deliberately NOT applied to /api/items: the catalogue is identical for
+ * everyone and benefits from being cacheable.
+ */
+export const PRIVATE_CACHE_CONTROL = "private, no-store";
+
+export function privateJson(data, status = 200, headers = {}) {
+  return json(data, status, { "cache-control": PRIVATE_CACHE_CONTROL, ...headers });
+}
+
 export function error(message, status = 400, headers = {}) {
   return json({ error: message }, status, headers);
 }
@@ -78,7 +96,7 @@ export async function handleLogout(request, env) {
   const sessionId = readCookie(request, SESSION_COOKIE);
   if (sessionId) await deleteSession(env, sessionId);
   // Always clear the cookie, even if the session was already gone.
-  return json({ ok: true }, 200, { "set-cookie": clearedSessionCookie() });
+  return privateJson({ ok: true }, 200, { "set-cookie": clearedSessionCookie() });
 }
 
 /* ------------------------------------------------------------------- items */
@@ -109,7 +127,7 @@ export async function handleGetWatchStatus(request, env, user) {
     .bind(user.user_id)
     .all();
 
-  return json({
+  return privateJson({
     watch_status: results.map((r) => ({
       ...r,
       episode_progress: parseProgress(r.episode_progress),
@@ -196,7 +214,7 @@ export async function handlePutWatchStatus(request, env, user, itemId) {
     .bind(user.user_id, itemId)
     .first();
 
-  return json({ watch_status: { ...row, episode_progress: parseProgress(row.episode_progress) } });
+  return privateJson({ watch_status: { ...row, episode_progress: parseProgress(row.episode_progress) } });
 }
 
 /* ---------------------------------------------------------------- settings */
@@ -208,7 +226,7 @@ export async function handleGetSettings(request, env, user) {
     .bind(user.user_id)
     .first();
 
-  return json({
+  return privateJson({
     settings: {
       countdown_target_date: row?.countdown_target_date ?? null,
       countdown_label: row?.countdown_label ?? null,
@@ -243,5 +261,5 @@ export async function handlePutSettings(request, env, user) {
     .bind(user.user_id, date, label)
     .run();
 
-  return json({ settings: { countdown_target_date: date, countdown_label: label } });
+  return privateJson({ settings: { countdown_target_date: date, countdown_label: label } });
 }

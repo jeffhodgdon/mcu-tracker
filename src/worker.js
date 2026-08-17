@@ -18,6 +18,7 @@ import {
   handlePutSettings,
   handlePutWatchStatus,
   HttpError,
+  PRIVATE_CACHE_CONTROL,
 } from "./api.js";
 import { handleGoogleCallback, startGoogleAuth } from "./oauth.js";
 
@@ -102,12 +103,23 @@ async function handleApi(request, env, ctx, url) {
 function jsonUser(user) {
   return new Response(
     JSON.stringify({ user: { id: user.user_id, email: user.email } }),
-    { headers: { "content-type": "application/json; charset=utf-8" } }
+    {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": PRIVATE_CACHE_CONTROL,
+      },
+    }
   );
 }
 
+/**
+ * Also marked private: a cached 401 on a user-scoped path would be served to
+ * signed-in callers too, locking them out of their own data.
+ */
 function unauthorized() {
-  return error("Authentication required", 401);
+  return error("Authentication required", 401, {
+    "cache-control": PRIVATE_CACHE_CONTROL,
+  });
 }
 
 function methodNotAllowed(allow) {
@@ -144,9 +156,16 @@ async function health(request, env, url) {
   return text(lines, 200);
 }
 
+/**
+ * The health page reports which account is signed in, so it varies per user
+ * and must never be cached either — despite not living under /api/.
+ */
 function text(lines, status) {
   return new Response(lines.join("\n") + "\n", {
     status,
-    headers: { "content-type": "text/plain; charset=utf-8" },
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": PRIVATE_CACHE_CONTROL,
+    },
   });
 }

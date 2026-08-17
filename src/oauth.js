@@ -11,6 +11,9 @@
  */
 
 import { createSession, normalizeEmail, sessionCookie } from "./auth.js";
+// Every response here either issues or clears a credential cookie, so none of
+// them may be stored by any cache.
+import { PRIVATE_CACHE_CONTROL as PRIVATE_CACHE } from "./api.js";
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -202,7 +205,11 @@ export async function startGoogleAuth(request, env, url) {
 
   return new Response(null, {
     status: 302,
-    headers: { location: authUrl.toString(), "set-cookie": stateCookie(signed) },
+    headers: {
+      location: authUrl.toString(),
+      "set-cookie": stateCookie(signed),
+      "cache-control": PRIVATE_CACHE,
+    },
   });
 }
 
@@ -277,6 +284,7 @@ export async function handleGoogleCallback(request, env, url, readCookie) {
       ["location", "/"],
       ["set-cookie", sessionCookie(sessionId)],
       ["set-cookie", clearedStateCookie()],
+      ["cache-control", PRIVATE_CACHE],
     ],
   });
 }
@@ -318,6 +326,7 @@ function failure(message, status) {
     headers: {
       "content-type": "text/plain; charset=utf-8",
       "set-cookie": clearedStateCookie(),
+      "cache-control": PRIVATE_CACHE,
     },
   });
 }
