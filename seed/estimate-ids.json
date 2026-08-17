@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Item ids whose runtime_min is an estimate rather than a confirmed figure.",
+    "Previously derived from the CSV's 'Runtime Source' column, which was removed",
+    "because it named personal media-server tooling. This file holds ids only --",
+    "no provenance strings -- so the flag survives without reintroducing that data.",
+    "Captured from the dev database before the column was dropped.",
+    "To change a flag, edit this list and re-run scripts/generate-seed.mjs."
+  ],
+  "ids": [
+    62,
+    63,
+    64,
+    66,
+    69,
+    71,
+    73,
+    75,
+    76,
+    77,
+    79,
+    82,
+    83,
+    84,
+    86,
+    87,
+    88,
+    90,
+    91,
+    92,
+    94,
+    96,
+    98,
+    100,
+    101,
+    102,
+    103,
+    105
+  ]
+}

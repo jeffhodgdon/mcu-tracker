@@ -1,0 +1,118 @@
+#,Title,Type,Release Date,Phase,Notes,Runtime (min)
+1,Iron Man,Film,2008-05-02,Phase 1,,126
+2,The Incredible Hulk,Film,2008-06-13,Phase 1,,112
+3,Iron Man 2,Film,2010-05-07,Phase 1,,124
+4,Thor,Film,2011-05-06,Phase 1,,115
+5,Captain America: The First Avenger,Film,2011-07-22,Phase 1,,124
+6,The Consultant,One-Shot,2011-09-13,Phase 1,Home video short,4
+7,A Funny Thing Happened on the Way to Thor's Hammer,One-Shot,2011-10-25,Phase 1,Home video short,4
+8,The Avengers,Film,2012-05-04,Phase 1,,143
+9,Item 47,One-Shot,2012-09-25,Phase 1,Home video short,12
+10,Iron Man 3,Film,2013-05-03,Phase 2,,130
+11,Agent Carter,One-Shot,2013-09-08,Phase 2,Home video short,15
+12,Agents of S.H.I.E.L.D. (Season 1),Marvel Television,2013-09-24,Marvel Television,ABC - Overlaps Winter Soldier; HYDRA reveal,935
+13,Thor: The Dark World,Film,2013-11-08,Phase 2,,112
+14,All Hail the King,One-Shot,2014-02-25,Phase 2,Home video short,14
+15,Captain America: The Winter Soldier,Film,2014-04-04,Phase 2,,136
+16,Guardians of the Galaxy,Film,2014-08-01,Phase 2,,122
+17,Agents of S.H.I.E.L.D. (Season 2),Marvel Television,2014-09-23,Marvel Television,ABC - Inhumans / Terrigen introduced,941
+18,Agent Carter (Season 1),Marvel Television,2015-01-06,Marvel Television,ABC - Follows the Agent Carter one-shot,333
+19,Daredevil (Season 1),Marvel Television,2015-04-10,Marvel Television,Netflix - The Hand groundwork; post-Avengers NYC,679
+20,Avengers: Age of Ultron,Film,2015-05-01,Phase 2,,141
+21,Ant-Man,Film,2015-07-17,Phase 2,,117
+22,Agents of S.H.I.E.L.D. (Season 3),Marvel Television,2015-09-29,Marvel Television,ABC - Secret Warriors,941
+23,Jessica Jones (Season 1),Marvel Television,2015-11-20,Marvel Television,Netflix,670
+24,Agent Carter (Season 2),Marvel Television,2016-01-19,Marvel Television,ABC - Darkforce introduced,424
+25,Daredevil (Season 2),Marvel Television,2016-03-18,Marvel Television,Netflix - Introduces Punisher and Elektra; The Hand,690
+26,Captain America: Civil War,Film,2016-05-06,Phase 3,,147
+27,Team Thor,One-Shot,2016-08-28,Phase 3,Mockumentary short,3
+28,Agents of S.H.I.E.L.D. (Season 4),Marvel Television,2016-09-20,Marvel Television,"ABC - DARKHOLD arc; Ghost Rider, LMDs, Framework",941
+29,Luke Cage (Season 1),Marvel Television,2016-09-30,Marvel Television,Netflix,703
+30,Doctor Strange,Film,2016-11-04,Phase 3,,115
+31,Team Thor: Part 2,One-Shot,2017-02-28,Phase 3,Mockumentary short,5
+32,Iron Fist (Season 1),Marvel Television,2017-03-17,Marvel Television,Netflix - K'un-Lun and The Hand,703
+33,Guardians of the Galaxy Vol. 2,Film,2017-05-05,Phase 3,,136
+34,Spider-Man: Homecoming,Film,2017-07-07,Phase 3,,133
+35,The Defenders (Season 1),Marvel Television,2017-08-18,Marvel Television,Netflix - The Hand crossover event,393
+36,Inhumans (Season 1),Marvel Television,2017-09-29,Marvel Television,ABC - Attilan; ties to AoS Inhumans arc,338
+37,Thor: Ragnarok,Film,2017-11-03,Phase 3,,130
+38,The Punisher (Season 1),Marvel Television,2017-11-17,Marvel Television,Netflix - Frank Castle solo,675
+39,Runaways (Season 1),Marvel Television,2017-11-21,Marvel Television,Hulu,493
+40,Agents of S.H.I.E.L.D. (Season 5),Marvel Television,2017-12-01,Marvel Television,ABC - Future arc; ends at the Snap,934
+41,Black Panther,Film,2018-02-16,Phase 3,,134
+42,Team Darryl,One-Shot,2018-03-06,Phase 3,Mockumentary short,6
+43,Jessica Jones (Season 2),Marvel Television,2018-03-08,Marvel Television,Netflix,665
+44,Avengers: Infinity War,Film,2018-04-27,Phase 3,,149
+45,Cloak & Dagger (Season 1),Marvel Television,2018-06-07,Marvel Television,Freeform - Darkforce powers,418
+46,Luke Cage (Season 2),Marvel Television,2018-06-22,Marvel Television,Netflix,752
+47,Ant-Man and the Wasp,Film,2018-07-06,Phase 3,,118
+48,Iron Fist (Season 2),Marvel Television,2018-09-07,Marvel Television,Netflix,516
+49,Daredevil (Season 3),Marvel Television,2018-10-19,Marvel Television,Netflix - Bullseye; leads into Born Again,648
+50,Runaways (Season 2),Marvel Television,2018-12-21,Marvel Television,Hulu,615
+51,The Punisher (Season 2),Marvel Television,2019-01-18,Marvel Television,Netflix,671
+52,Captain Marvel,Film,2019-03-08,Phase 3,,124
+53,Cloak & Dagger (Season 2),Marvel Television,2019-04-04,Marvel Television,Freeform - Crosses over with Runaways,417
+54,Avengers: Endgame,Film,2019-04-26,Phase 3,,181
+55,Agents of S.H.I.E.L.D. (Season 6),Marvel Television,2019-05-10,Marvel Television,ABC - Timeline begins diverging,548
+56,Jessica Jones (Season 3),Marvel Television,2019-06-14,Marvel Television,Netflix,652
+57,Spider-Man: Far From Home,Film,2019-07-02,Phase 3,,129
+58,Peter's To-Do List,One-Shot,2019-07-02,Phase 3,Home video short (Spider-Man: Far From Home bonus),4
+59,Runaways (Season 3),Marvel Television,2019-12-13,Marvel Television,Hulu - Cloak & Dagger crossover,481
+60,Agents of S.H.I.E.L.D. (Season 7),Marvel Television,2020-05-27,Marvel Television,ABC - Time travel; splits into its own branch timeline,553
+61,Helstrom (Season 1),Marvel Television,2020-10-16,Marvel Television,Hulu - Loosest canon tie of the group,499
+62,WandaVision (Season 1),TV Series,2021-01-15,Phase 4,,349
+63,The Falcon and the Winter Soldier (Season 1),TV Series,2021-03-19,Phase 4,,316
+64,Loki (Season 1),TV Series,2021-06-09,Phase 4,,291
+65,Black Widow,Film,2021-07-09,Phase 4,"1995 prologue, main story set 2016",134
+66,What If...? (Season 1),Animated Series,2021-08-11,Phase 4,,294
+67,Shang-Chi and the Legend of the Ten Rings,Film,2021-09-03,Phase 4,,132
+68,Eternals,Film,2021-11-05,Phase 4,,156
+69,Hawkeye (Season 1),TV Series,2021-11-24,Phase 4,,288
+70,Spider-Man: No Way Home,Film,2021-12-17,Phase 4,,148
+71,Moon Knight (Season 1),TV Series,2022-03-30,Phase 4,,290
+72,Doctor Strange in the Multiverse of Madness,Film,2022-05-06,Phase 4,,126
+73,Ms. Marvel (Season 1),TV Series,2022-06-08,Phase 4,,285
+74,Thor: Love and Thunder,Film,2022-07-08,Phase 4,,119
+75,I Am Groot (Season 1),Animated Series,2022-08-10,Phase 4,Shorts collection,25
+76,She-Hulk: Attorney at Law (Season 1),TV Series,2022-08-18,Phase 4,,306
+77,Werewolf by Night,Special Presentation,2022-10-07,Phase 4,Special Presentation,53
+78,Black Panther: Wakanda Forever,Film,2022-11-11,Phase 4,,161
+79,The Guardians of the Galaxy Holiday Special,Special Presentation,2022-11-25,Phase 4,Special Presentation,42
+80,Ant-Man and the Wasp: Quantumania,Film,2023-02-17,Phase 5,,124
+81,Guardians of the Galaxy Vol. 3,Film,2023-05-05,Phase 5,,150
+82,Secret Invasion (Season 1),TV Series,2023-06-21,Phase 5,,284
+83,I Am Groot (Season 2),Animated Series,2023-09-06,Phase 5,Shorts collection,25
+84,Loki (Season 2),TV Series,2023-10-05,Phase 5,,307
+85,The Marvels,Film,2023-11-10,Phase 5,,105
+86,What If...? (Season 2),Animated Series,2023-12-22,Phase 5,,289
+87,Echo (Season 1),TV Series,2024-01-09,Phase 5,Marvel Spotlight banner,218
+88,X-Men '97 (Season 1),Animated Series,2024-03-20,Phase 5,Outside main timeline,334
+89,Deadpool & Wolverine,Film,2024-07-26,Phase 5,,128
+90,Agatha All Along (Season 1),TV Series,2024-09-18,Phase 5,,368
+91,What If...? (Season 3),Animated Series,2024-12-22,Phase 5,,254
+92,Your Friendly Neighborhood Spider-Man (Season 1),Animated Series,2025-01-29,Phase 5,Outside main timeline,300
+93,Captain America: Brave New World,Film,2025-02-14,Phase 5,,118
+94,Daredevil: Born Again (Season 1),TV Series,2025-03-04,Phase 5,,426
+95,Thunderbolts*,Film,2025-05-02,Phase 5,aka The New Avengers,126
+96,Ironheart (Season 1),TV Series,2025-06-24,Phase 5,,289
+97,The Fantastic Four: First Steps,Film,2025-07-25,Phase 6,Set on Earth-828,115
+98,Eyes of Wakanda (Season 1),Animated Series,2025-08-01,Phase 6,Sacred Timeline canon; earliest-set MCU project,118
+99,Wonder Man (Season 1),TV Series,2026-01-27,Phase 6,Renewed for Season 2,250
+100,Daredevil: Born Again (Season 2),TV Series,2026-03-24,Phase 6,,360
+101,The Punisher: One Last Kill,Special Presentation,2026-05-12,Phase 6,Special Presentation,48
+102,Spider-Noir (Season 1),TV Series,2026-05-27,Phase 6,Outside main timeline,344
+103,X-Men '97 (Season 2),Animated Series,2026-07-01,Phase 6,Outside main timeline,297
+104,Spider-Man: Brand New Day,Film,2026-07-31,Phase 6,MUTANT ENTRY POINT: introduces Earth-616 Jean Grey (Sadie Sink); Punisher appears,145
+105,VisionQuest (Season 1),TV Series,2026-10-14,Phase 6,"SOURCES CONFLICT: some list Jan 7 2026, recent reporting says Oct 14 2026",240
+106,Avengers: Doomsday,Film,2026-12-18,Phase 6,UPCOMING; delayed from May 1 2026,165
+107,Untitled Marvel Film,Film,2027-07-00,Phase 6,"UPCOMING; dated, untitled",
+108,Avengers: Secret Wars,Film,2027-12-17,Phase 6,"UPCOMING; Multiverse Saga finale, delayed from May 2027",
+109,Ghost Rider,Film,2028-00-00,TBD,"UPCOMING; Ryan Gosling, announced SDCC 2026, exact date TBD",
+110,Untitled Marvel Film,Film,2028-02-18,TBD,"UPCOMING; date held, untitled",
+111,Untitled Marvel Film,Film,2028-05-05,TBD,"UPCOMING; date held, untitled",
+112,Untitled Marvel Film,Film,2028-11-10,TBD,"UPCOMING; date held, untitled",
+113,Black Panther 3,Film,2028-12-15,TBD,"UPCOMING; David Jonsson as Toussaint, dir. Coogler",
+114,Untitled Marvel Film,Film,2029-00-00,TBD,"UPCOMING; date held, untitled",
+115,Untitled Marvel Film,Film,2029-00-01,TBD,"UPCOMING; date held, untitled",
+116,X-Men (MCU reboot),Film,TBD,TBD,"UPCOMING; dir. Jake Schreier, no date announced",
+117,Wonder Man (Season 2),TV Series,TBD,TBD,"UPCOMING; renewed, no date announced",

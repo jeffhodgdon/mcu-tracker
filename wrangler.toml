@@ -1,0 +1,27 @@
+name = "mcu-tracker"
+main = "src/worker.js"
+compatibility_date = "2026-08-01"
+
+[observability]
+enabled = true
+
+# --- Dev -------------------------------------------------------------------
+# Subdomain routing via a Workers Custom Domain. Cloudflare creates and manages
+# the proxied DNS record and the edge certificate automatically on deploy, so
+# there is no manual dashboard step. Matches how physics.kjserver.dev is set up.
+[env.dev]
+name = "mcu-tracker-dev"
+routes = [{ pattern = "mcu-dev.kjserver.dev", custom_domain = true }]
+vars = { ENVIRONMENT = "dev" }
+d1_databases = [
+  { binding = "DB", database_name = "mcu-tracker-dev", database_id = "be5173a2-edb7-49ce-9419-da5e92e8c6e3", migrations_dir = "migrations" },
+]
+
+# --- Production ------------------------------------------------------------
+[env.production]
+name = "mcu-tracker"
+routes = [{ pattern = "mcu.kjserver.dev", custom_domain = true }]
+vars = { ENVIRONMENT = "production" }
+d1_databases = [
+  { binding = "DB", database_name = "mcu-tracker-prod", database_id = "3844d07e-5760-4cca-8491-1edb4ba341ce", migrations_dir = "migrations" },
+]

@@ -1,0 +1,27 @@
+{
+  "name": "mcu-tracker",
+  "version": "0.1.0",
+  "description": "Public multi-user MCU watch tracker on Cloudflare Workers + D1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env dev",
+    "deploy:dev": "wrangler deploy --env dev",
+    "deploy:prod": "wrangler deploy --env production",
+    "tail:dev": "wrangler tail --env dev",
+    "tail:prod": "wrangler tail --env production",
+    "seed:generate": "node scripts/generate-seed.mjs",
+    "migrate:dev": "wrangler d1 migrations apply mcu-tracker-dev --env dev --remote",
+    "seed:dev": "wrangler d1 execute mcu-tracker-dev --env dev --remote --file seed/items.sql",
+    "d1:dev": "wrangler d1 execute mcu-tracker-dev --remote",
+    "d1:prod": "wrangler d1 execute mcu-tracker-prod --remote"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.123.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260811.1": true
+  }
+}
