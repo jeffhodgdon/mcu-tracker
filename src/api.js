@@ -12,6 +12,7 @@ import {
   SESSION_COOKIE,
   clearedSessionCookie,
 } from "./auth.js";
+import { consolidateItems } from "./consolidate.js";
 
 const WATCH_STATUSES = new Set(["unwatched", "watched", "want_rewatch", "skip"]);
 
@@ -104,8 +105,12 @@ export async function handleLogout(request, env) {
 export async function handleListItems(request, env) {
   // Ordered by id: the seed preserves the spreadsheet's curated running order,
   // which is more meaningful than sorting by a partially-known release date.
+  // Pages that need a different order (release date, chronological) sort
+  // client-side from this one response rather than each fetching their own
+  // shape — /api/items stays the single source of catalogue data.
   const { results } = await env.DB.prepare(
-    `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate
+    `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate,
+            chrono_order, chrono_setting
        FROM items
       ORDER BY id`
   ).all();
@@ -113,6 +118,37 @@ export async function handleListItems(request, env) {
   return json({
     items: results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 })),
   });
+}
+
+/**
+ * Franchises collapsed to one row each: entry count, first release date, and
+ * the ids of every member so the client can still show/link individual
+ * entries on demand. Grouped in JS from a plain items query — there is no
+ * separate consolidated table, so this and /api/items can never disagree
+ * about what a franchise contains. See consolidate.js for the grouping rules
+ * and their known, documented divergence from the original spreadsheet.
+ */
+export async function handleConsolidated(request, env) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, title, type, release_date, phase, runtime_min, is_estimate
+       FROM items
+      ORDER BY id`
+  ).all();
+
+  const items = results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 }));
+  return json({ groups: consolidateItems(items) });
+}
+
+/* ------------------------------------------------------------ other universes */
+
+export async function handleOtherUniverses(request, env) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, universe, title, setting, release_date, runtime_min, notes
+       FROM other_universes
+      ORDER BY id`
+  ).all();
+
+  return json({ other_universes: results });
 }
 
 /* ------------------------------------------------------------ watch status */

@@ -13,11 +13,11 @@ import { STYLES } from "./styles.js";
 import { formatRuntime, formatHours, isRealDate, daysUntil } from "./format.js";
 
 export const NAV = [
-  { href: "/mcu/", id: "dashboard", label: "Dashboard" },
-  { href: "/mcu/release", id: "release", label: "Release Order" },
-  { href: "/mcu/chronological", id: "chronological", label: "Chronological" },
-  { href: "/mcu/consolidated", id: "consolidated", label: "Consolidated" },
-  { href: "/mcu/other", id: "other", label: "Other Universes" },
+  { href: "/", id: "dashboard", label: "Dashboard" },
+  { href: "/release", id: "release", label: "Release Order" },
+  { href: "/chronological", id: "chronological", label: "Chronological" },
+  { href: "/consolidated", id: "consolidated", label: "Consolidated" },
+  { href: "/other", id: "other", label: "Other Universes" },
 ];
 
 /* ------------------------------------------------- client-side runtime ---- */

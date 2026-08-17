@@ -11,10 +11,12 @@
 import { authenticate, readCookie } from "./auth.js";
 import {
   error,
+  handleConsolidated,
   handleGetSettings,
   handleGetWatchStatus,
   handleListItems,
   handleLogout,
+  handleOtherUniverses,
   handlePutSettings,
   handlePutWatchStatus,
   HttpError,
@@ -23,7 +25,9 @@ import {
 import { handleGoogleCallback, startGoogleAuth } from "./oauth.js";
 import { dashboardPage } from "./ui/dashboard.js";
 import { releasePage } from "./ui/release.js";
-import { isPlaceholder, placeholderPage } from "./ui/placeholder.js";
+import { chronologicalPage } from "./ui/chronological.js";
+import { consolidatedPage } from "./ui/consolidated.js";
+import { otherPage } from "./ui/other.js";
 import { htmlResponse } from "./ui/shell.js";
 
 export default {
@@ -53,21 +57,18 @@ export default {
 };
 
 /**
- * The UI lives under /mcu/ as specified. The bare hostname redirects there so
- * mcu.kjserver.dev is not a dead end — and so the OAuth callback, which lands
- * on "/", ends up on the dashboard.
+ * The UI lives at the domain root: mcu(-dev).kjserver.dev IS the app, so
+ * there is no /mcu/ prefix to carry. The OAuth callback's success redirect
+ * (oauth.js) lands on "/", which is the dashboard.
  */
 function handlePage(url) {
   const path = url.pathname;
 
-  if (path === "/" || path === "/mcu") {
-    return Response.redirect(new URL("/mcu/", url).toString(), 302);
-  }
-  if (path === "/mcu/") return htmlResponse(dashboardPage());
-  if (path === "/mcu/release") return htmlResponse(releasePage());
-
-  const match = /^\/mcu\/([a-z-]+)\/?$/.exec(path);
-  if (match && isPlaceholder(match[1])) return htmlResponse(placeholderPage(match[1]));
+  if (path === "/" || path === "") return htmlResponse(dashboardPage());
+  if (path === "/release") return htmlResponse(releasePage());
+  if (path === "/chronological") return htmlResponse(chronologicalPage());
+  if (path === "/consolidated") return htmlResponse(consolidatedPage());
+  if (path === "/other") return htmlResponse(otherPage());
 
   return null;
 }
@@ -103,6 +104,14 @@ async function handleApi(request, env, ctx, url) {
 
   if (pathname === "/api/items") {
     return method === "GET" ? handleListItems(request, env) : methodNotAllowed("GET");
+  }
+
+  if (pathname === "/api/consolidated") {
+    return method === "GET" ? handleConsolidated(request, env) : methodNotAllowed("GET");
+  }
+
+  if (pathname === "/api/other-universes") {
+    return method === "GET" ? handleOtherUniverses(request, env) : methodNotAllowed("GET");
   }
 
   // --- authenticated ------------------------------------------------------

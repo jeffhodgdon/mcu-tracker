@@ -1,10 +1,5 @@
 /**
- * Shared dark theme.
- *
- * Built fresh: no stylesheet from the earlier tracker exists in this repo, so
- * there was nothing to carry forward beyond the plain-text health page's
- * terminal feel. Kept deliberately plain so it is cheap to restyle once the
- * original palette is available.
+ * Shared dark theme — palette carried over from the original tracker artifact.
  *
  * Responsive rule: one layout, two arrangements. Above 820px the nav is a
  * fixed left rail; below it becomes a top bar with a disclosure menu, which
@@ -13,16 +8,17 @@
 
 export const STYLES = `
 :root {
-  --bg: #0b0d10;
-  --panel: #141921;
-  --panel-2: #1b212b;
-  --border: #263041;
-  --text: #e7ebf2;
-  --muted: #8d99ad;
-  --accent: #e23636;
-  --link: #6aa4ff;
-  --ok: #3fb950;
-  --warn: #d29922;
+  --bg: #0b0d14;
+  --card: #141824;
+  --card2: #1b2030;
+  --accent: #e0313b;
+  --accent2: #ffb020;
+  --text: #eef0f5;
+  --muted: #8b93a7;
+  --done: #2fae66;
+  --border: #262c3d;
+
+  --card-bg: linear-gradient(155deg, var(--card), var(--card2));
   --rail: 232px;
   --radius: 10px;
 }
@@ -39,7 +35,7 @@ html, body {
   -webkit-text-size-adjust: 100%;
 }
 
-a { color: var(--link); text-decoration: none; }
+a { color: var(--accent2); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* ------------------------------------------------------------------ layout */
@@ -48,7 +44,7 @@ a:hover { text-decoration: underline; }
   position: fixed;
   inset: 0 auto 0 0;
   width: var(--rail);
-  background: var(--panel);
+  background: var(--card-bg);
   border-right: 1px solid var(--border);
   padding: 20px 14px;
   display: flex;
@@ -81,13 +77,12 @@ a:hover { text-decoration: underline; }
   border: 1px solid transparent;
   font-size: 14px;
 }
-.nav a:hover { background: var(--panel-2); text-decoration: none; }
+.nav a:hover { background: var(--card2); text-decoration: none; }
 .nav a[aria-current="page"] {
-  background: var(--panel-2);
+  background: var(--card2);
   border-color: var(--border);
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.nav a .soon { color: var(--muted); font-size: 11px; margin-left: 5px; }
 
 .rail-foot { margin-top: auto; font-size: 12px; color: var(--muted); }
 .rail-foot .who { color: var(--text); word-break: break-all; }
@@ -107,7 +102,6 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .3px; }
 .sub { color: var(--muted); margin: 0 0 22px; font-size: 13px; }
 
-/* Mobile bar, hidden on desktop */
 .topbar { display: none; }
 
 @media (max-width: 820px) {
@@ -124,7 +118,7 @@ h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .3px; }
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
   }
   .menu-btn {
-    background: var(--panel-2); color: var(--text);
+    background: var(--card2); color: var(--text);
     border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 12px; font-size: 14px; cursor: pointer;
   }
@@ -141,7 +135,7 @@ h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .3px; }
 }
 
 .card {
-  background: var(--panel);
+  background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
@@ -153,24 +147,24 @@ h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .3px; }
 .stat-note { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
 .bar {
-  height: 8px; background: var(--panel-2);
+  height: 8px; background: var(--bg);
   border-radius: 99px; overflow: hidden; margin-top: 12px;
   border: 1px solid var(--border);
 }
-.bar > i { display: block; height: 100%; background: var(--accent); }
+.bar > i { display: block; height: 100%; background: var(--done); }
 
 /* ------------------------------------------------------------------ inputs */
 
-button, select, input[type="date"], input[type="text"] {
+button, select, input[type="date"], input[type="text"], input[type="search"] {
   font: inherit;
-  background: var(--panel-2);
+  background: var(--card2);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
 }
 button { cursor: pointer; }
-button:hover { border-color: #35415a; }
+button:hover { border-color: #36405c; }
 button:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
 
 .btn-primary {
@@ -188,7 +182,7 @@ button:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
 .upcoming { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .upcoming button {
   display: flex; justify-content: space-between; gap: 12px; width: 100%;
-  text-align: left; background: var(--panel-2); padding: 9px 11px;
+  text-align: left; background: var(--card2); padding: 9px 11px;
 }
 .upcoming button .d { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
@@ -199,21 +193,33 @@ thead th {
   padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
 tbody td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-tbody tr:hover { background: var(--panel); }
+tbody tr:hover { background: var(--card2); }
 tbody tr.watched .title { color: var(--muted); text-decoration: line-through; }
+tbody tr.watched td:first-child { box-shadow: inset 2px 0 0 var(--done); }
 .title { font-weight: 500; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* Section headings inside a table, e.g. each universe or the unplaceable block */
+tbody tr.section td {
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px; font-weight: 700;
+  padding: 12px 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+tbody tr.section:hover td { background: var(--bg); }
+
 .badge {
   display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 99px;
-  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+  background: var(--card2); border: 1px solid var(--border); color: var(--muted);
   white-space: nowrap;
 }
-.badge.est { border-color: #4a3a12; color: var(--warn); }
+.badge.est { border-color: #5a4413; color: var(--accent2); }
+.badge.count { border-color: #4a1f24; color: var(--accent); }
 
 .muted { color: var(--muted); }
 .notice {
-  background: var(--panel); border: 1px solid var(--border);
+  background: var(--card-bg); border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px;
 }
@@ -223,8 +229,9 @@ tbody tr.watched .title { color: var(--muted); text-decoration: line-through; }
 }
 .hide { display: none !important; }
 
-/* On narrow screens the table sheds its lower-priority columns rather than
-   forcing a horizontal scroll, which is unusable one-handed. */
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.toolbar input[type="search"] { flex: 1; min-width: 190px; }
+
 @media (max-width: 720px) {
   thead th.opt, tbody td.opt { display: none; }
   tbody td, thead th { padding: 8px 6px; }
