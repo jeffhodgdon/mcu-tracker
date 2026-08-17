@@ -1,27 +1,25 @@
 /**
- * MCU Tracker — Phase 2: schema, auth and the tracker API.
+ * MCU Tracker — schema, Google sign-in and the tracker API.
  *
  * Routing is per-subdomain (mcu / mcu-dev), so the Worker owns the whole
  * hostname and paths are relative to root — no route prefix to strip.
  *
  * There is no UI yet; anything outside /api/ returns a plain-text health
- * response that also proves the D1 binding resolved.
+ * response that also reports whether the caller is signed in.
  */
 
-import { authenticate } from "./auth.js";
+import { authenticate, readCookie } from "./auth.js";
 import {
   error,
   handleGetSettings,
   handleGetWatchStatus,
   handleListItems,
-  handleLogin,
   handleLogout,
   handlePutSettings,
   handlePutWatchStatus,
-  handleSignup,
   HttpError,
-  json,
 } from "./api.js";
+import { handleGoogleCallback, startGoogleAuth } from "./oauth.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -34,8 +32,7 @@ export default {
       return await health(request, env, url);
     } catch (err) {
       if (err instanceof HttpError) {
-        const headers = err.status === 429 ? { "retry-after": "600" } : {};
-        return error(err.message, err.status, headers);
+        return error(err.message, err.status);
       }
       console.error("unhandled error", err?.stack || String(err));
       return error("Internal error", 500);
@@ -47,29 +44,37 @@ async function handleApi(request, env, ctx, url) {
   const { pathname } = url;
   const method = request.method.toUpperCase();
 
-  // --- public endpoints ---------------------------------------------------
+  // --- sign-in ------------------------------------------------------------
 
-  if (pathname === "/api/signup") {
-    return method === "POST"
-      ? handleSignup(request, env)
-      : methodNotAllowed("POST");
+  if (pathname === "/api/auth/google") {
+    return method === "GET" ? startGoogleAuth(request, env, url) : methodNotAllowed("GET");
   }
 
-  if (pathname === "/api/login") {
-    return method === "POST" ? handleLogin(request, env) : methodNotAllowed("POST");
+  if (pathname === "/api/auth/google/callback") {
+    return method === "GET"
+      ? handleGoogleCallback(request, env, url, readCookie)
+      : methodNotAllowed("GET");
   }
 
-  if (pathname === "/api/logout") {
+  if (pathname === "/api/auth/logout") {
     return method === "POST" ? handleLogout(request, env) : methodNotAllowed("POST");
   }
+
+  // --- public -------------------------------------------------------------
 
   if (pathname === "/api/items") {
     return method === "GET" ? handleListItems(request, env) : methodNotAllowed("GET");
   }
 
-  // --- authenticated endpoints -------------------------------------------
+  // --- authenticated ------------------------------------------------------
 
   const user = await authenticate(request, env);
+
+  if (pathname === "/api/me") {
+    if (method !== "GET") return methodNotAllowed("GET");
+    if (!user) return unauthorized();
+    return jsonUser(user);
+  }
 
   if (pathname === "/api/watch-status") {
     if (method !== "GET") return methodNotAllowed("GET");
@@ -81,8 +86,7 @@ async function handleApi(request, env, ctx, url) {
   if (watchMatch) {
     if (method !== "PUT") return methodNotAllowed("PUT");
     if (!user) return unauthorized();
-    const itemId = Number(watchMatch[1]);
-    return handlePutWatchStatus(request, env, user, itemId);
+    return handlePutWatchStatus(request, env, user, Number(watchMatch[1]));
   }
 
   if (pathname === "/api/settings") {
@@ -95,6 +99,13 @@ async function handleApi(request, env, ctx, url) {
   return error("Not found", 404);
 }
 
+function jsonUser(user) {
+  return new Response(
+    JSON.stringify({ user: { id: user.user_id, email: user.email } }),
+    { headers: { "content-type": "application/json; charset=utf-8" } }
+  );
+}
+
 function unauthorized() {
   return error("Authentication required", 401);
 }
@@ -105,10 +116,9 @@ function methodNotAllowed(allow) {
 
 async function health(request, env, url) {
   const lines = [
-    "MCU Tracker - Phase 2 API OK",
+    "MCU Tracker - API OK",
     `environment: ${env.ENVIRONMENT ?? "unknown"}`,
     `host: ${url.hostname}`,
-    `path: ${url.pathname}`,
   ];
 
   try {
@@ -117,6 +127,18 @@ async function health(request, env, url) {
   } catch (err) {
     lines.push(`d1: FAILED (${err.message})`);
     return text(lines, 500);
+  }
+
+  // The visible confirmation that a browser sign-in actually worked.
+  try {
+    const user = await authenticate(request, env);
+    lines.push(
+      user
+        ? `signed in as: ${user.email}`
+        : "signed in as: nobody (visit /api/auth/google to sign in with Google)"
+    );
+  } catch (err) {
+    lines.push(`session check FAILED (${err.message})`);
   }
 
   return text(lines, 200);

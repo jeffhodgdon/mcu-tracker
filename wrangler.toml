@@ -12,7 +12,7 @@ enabled = true
 [env.dev]
 name = "mcu-tracker-dev"
 routes = [{ pattern = "mcu-dev.kjserver.dev", custom_domain = true }]
-vars = { ENVIRONMENT = "dev" }
+vars = { ENVIRONMENT = "dev", GOOGLE_CLIENT_ID = "65719986772-gaglu6q4orm65usj9g0hpno97k2hgc0m.apps.googleusercontent.com" }
 d1_databases = [
   { binding = "DB", database_name = "mcu-tracker-dev", database_id = "be5173a2-edb7-49ce-9419-da5e92e8c6e3", migrations_dir = "migrations" },
 ]
@@ -21,7 +21,7 @@ d1_databases = [
 [env.production]
 name = "mcu-tracker"
 routes = [{ pattern = "mcu.kjserver.dev", custom_domain = true }]
-vars = { ENVIRONMENT = "production" }
+vars = { ENVIRONMENT = "production", GOOGLE_CLIENT_ID = "65719986772-gaglu6q4orm65usj9g0hpno97k2hgc0m.apps.googleusercontent.com" }
 d1_databases = [
   { binding = "DB", database_name = "mcu-tracker-prod", database_id = "3844d07e-5760-4cca-8491-1edb4ba341ce", migrations_dir = "migrations" },
 ]

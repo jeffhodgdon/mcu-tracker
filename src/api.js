@@ -1,25 +1,17 @@
 /**
  * API route handlers.
  *
- * Auth endpoints are public by necessity; /api/items is public because the
- * catalogue is not user data and Phase 3 needs to render it before login.
- * Everything user-scoped goes through requireAuth in worker.js.
+ * Sign-in lives in oauth.js; /api/items is public because the catalogue is not
+ * user data and Phase 3 needs to render it before login. Everything
+ * user-scoped is gated on a session by worker.js.
  */
 
 import {
-  createSession,
   deleteSession,
-  hashPassword,
-  isValidEmail,
-  normalizeEmail,
-  passwordProblem,
   readCookie,
   SESSION_COOKIE,
-  sessionCookie,
   clearedSessionCookie,
-  verifyPassword,
 } from "./auth.js";
-import { checkRateLimit, clientIp } from "./ratelimit.js";
 
 const WATCH_STATUSES = new Set(["unwatched", "watched", "want_rewatch", "skip"]);
 
@@ -81,75 +73,6 @@ export class HttpError extends Error {
 }
 
 /* -------------------------------------------------------------------- auth */
-
-/** Shared by signup and login: both are credential-guessing surfaces. */
-function enforceAuthRateLimit(request) {
-  const { allowed, retryAfterSeconds } = checkRateLimit(clientIp(request));
-  if (!allowed) {
-    throw new HttpError(
-      `Too many attempts. Try again in ${retryAfterSeconds} seconds.`,
-      429
-    );
-  }
-}
-
-export async function handleSignup(request, env) {
-  enforceAuthRateLimit(request);
-  const body = await readJsonBody(request);
-
-  const email = normalizeEmail(body.email);
-  if (!isValidEmail(email)) return error("A valid email address is required", 400);
-
-  const problem = passwordProblem(body.password);
-  if (problem) return error(problem, 400);
-
-  const password_hash = await hashPassword(body.password);
-
-  let user;
-  try {
-    user = await env.DB.prepare(
-      "INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id, email, created_at"
-    )
-      .bind(email, password_hash)
-      .first();
-  } catch (err) {
-    // The UNIQUE index on users.email is the authority on duplicates; checking
-    // first and inserting after would race between two concurrent signups.
-    if (String(err.message || "").includes("UNIQUE")) {
-      return error("An account with that email already exists", 409);
-    }
-    throw err;
-  }
-
-  const sessionId = await createSession(env, user.id);
-  return json({ user: { id: user.id, email: user.email, created_at: user.created_at } }, 201, {
-    "set-cookie": sessionCookie(sessionId),
-  });
-}
-
-export async function handleLogin(request, env) {
-  enforceAuthRateLimit(request);
-  const body = await readJsonBody(request);
-
-  const email = normalizeEmail(body.email);
-  const password = String(body.password ?? "");
-
-  const user = await env.DB.prepare(
-    "SELECT id, email, password_hash FROM users WHERE email = ?"
-  )
-    .bind(email)
-    .first();
-
-  // Same response whether the email is unknown or the password is wrong, so
-  // this endpoint cannot be used to enumerate registered addresses.
-  const ok = user ? await verifyPassword(password, user.password_hash) : false;
-  if (!ok) return error("Invalid email or password", 401);
-
-  const sessionId = await createSession(env, user.id);
-  return json({ user: { id: user.id, email: user.email } }, 200, {
-    "set-cookie": sessionCookie(sessionId),
-  });
-}
 
 export async function handleLogout(request, env) {
   const sessionId = readCookie(request, SESSION_COOKIE);

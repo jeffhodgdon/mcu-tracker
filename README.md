@@ -3,13 +3,13 @@
 A public, multi-user Marvel Cinematic Universe watch tracker, running on
 Cloudflare Workers with D1 for storage.
 
-**Status: Phase 2 — schema, auth and API.** The database schema, email/password
-authentication and the tracker's JSON API are in place, and the catalogue is
-seeded from `seed-data.csv`. There is no UI yet — anything outside `/api/`
-returns a plain-text health response.
+**Status: backend complete, no UI yet.** The database schema, Google OAuth
+sign-in and the tracker's JSON API are in place, and the catalogue is seeded
+from `seed-data.csv`. Anything outside `/api/` returns a plain-text health
+response that also reports whether you are signed in.
 
-Phase 2 is applied to **dev only**. Production still has an empty database and
-is running the Phase 1 scaffold; see [Promoting to production](#promoting-to-production).
+Applied to **dev only**. Production still has an empty database and is running
+the earlier scaffold; see [Promoting to production](#promoting-to-production).
 
 ## Stack
 
@@ -123,14 +123,15 @@ The generator makes three decisions worth knowing about:
 ## API
 
 All endpoints return JSON. Session state is a `mcu_session` cookie
-(`HttpOnly; Secure; SameSite=Lax`), created on signup and login.
+(`HttpOnly; Secure; SameSite=Lax`), created when Google sign-in completes.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/signup` | – | Create account, start a session |
-| POST | `/api/login` | – | Start a session |
-| POST | `/api/logout` | – | Delete session, clear cookie |
+| GET | `/api/auth/google` | – | Redirect to Google's consent screen |
+| GET | `/api/auth/google/callback` | – | Google returns here; creates the session |
+| POST | `/api/auth/logout` | – | Delete session, clear cookie |
 | GET | `/api/items` | – | Full catalogue, ordered by curated id |
+| GET | `/api/me` | ✓ | Current signed-in user |
 | GET | `/api/watch-status` | ✓ | Caller's status for every tracked item |
 | PUT | `/api/watch-status/:item_id` | ✓ | Set `status` and/or `episode_progress` |
 | GET | `/api/settings` | ✓ | Countdown target date and label |
@@ -143,30 +144,59 @@ returns `401` without a valid session.
 `status` must be one of `unwatched`, `watched`, `want_rewatch`, `skip`. A `PUT`
 that sends only one of `status` / `episode_progress` leaves the other untouched.
 
-### Security notes
+`/api/items` is public; `/api/auth/*` must be reachable without Cloudflare
+Access in front of it, or Google's redirect back will be intercepted mid-flow.
 
-- Passwords are hashed with **PBKDF2-SHA256, 100,000 iterations**, a random
-  16-byte salt per password, compared in constant time. The iteration count and
-  salt are stored inside the hash string (`pbkdf2-sha256$<iters>$<salt>$<hash>`),
-  and verification always uses the parameters recorded with the hash it is
-  checking — so `PBKDF2_ITERATIONS` in `src/auth.js` can be changed at any time
-  without invalidating existing passwords.
+### Sign-in
 
-  **This account is on the Workers Free plan, which caps CPU at 10 ms per
-  request.** Measured on workerd, PBKDF2 costs roughly 4.6 ms at 50k
-  iterations, 8.3 ms at 100k, and 17.8 ms at 210k. The current 100k setting
-  therefore leaves under 2 ms of headroom for the rest of the request and is
-  expected to be marginal — raising it requires the paid plan, and 50k is the
-  safe setting if staying on free. See the table in `src/auth.js`.
-- Login returns the same response for an unknown email as for a wrong password,
-  so it cannot be used to enumerate accounts. Signup necessarily reveals that an
-  address is taken.
-- Session expiry is enforced in SQL (`expires_at > datetime('now')`), so a stale
-  row can never authenticate even if the cookie is replayed.
-- Rate limiting on signup/login is **10 attempts per IP per 10 minutes**, held
-  **in memory**. That state is per Worker isolate and resets when an isolate is
-  recycled, so it slows casual brute force but is not a hard boundary. Moving it
-  to KV or a Durable Object would make it global.
+Authentication is **Google OAuth2 / OpenID Connect, implemented in the Worker**
+— not Cloudflare Access, whose free tier caps at 50 seats and cannot serve an
+unlimited public audience.
+
+There are no passwords anywhere in this system. The first time an address
+signs in with Google the account is created automatically; `users` has no
+password column at all (dropped in `0002`), so password material cannot be
+stored even by mistake.
+
+The security of the whole flow rests on two checks:
+
+- **The ID token signature is verified against Google's published JWKS**
+  (`https://www.googleapis.com/oauth2/v3/certs`) before any claim in it is
+  trusted, along with issuer, audience and expiry. Decoding the payload
+  without verifying would let anyone mint a token for any address. The key set
+  is cached for an hour and refetched automatically when Google rotates to a
+  `kid` we have not seen.
+- **A signed `state` parameter guards the callback.** It is issued as a
+  short-lived HMAC-signed cookie and must match the value Google echoes back,
+  which stops a third party replaying their own login against your session.
+  That cookie is `SameSite=Lax` deliberately: the callback arrives as a
+  top-level navigation from Google, and `Strict` would withhold it exactly
+  when it is needed.
+
+Sessions are unchanged and independent of how a user signed in — a session row
+plus the same `HttpOnly; Secure; SameSite=Lax` cookie — so protected routes
+know nothing about OAuth. Expiry is still enforced in SQL, so a stale row
+cannot authenticate even if the cookie is replayed.
+
+Rate limiting on sign-in was removed with the password endpoints: Google now
+absorbs credential-guessing traffic, and there is nothing left to brute force.
+
+### Google client configuration
+
+One OAuth client serves both environments, with both callback URLs registered
+on it:
+
+```
+https://mcu.kjserver.dev/api/auth/google/callback
+https://mcu-dev.kjserver.dev/api/auth/google/callback
+```
+
+The Worker builds `redirect_uri` from the incoming request's origin, so each
+environment sends its own hostname and it byte-matches the registration.
+
+`GOOGLE_CLIENT_ID` is a plain var in `wrangler.toml` (it is public — it appears
+in the redirect URL on every sign-in). `GOOGLE_CLIENT_SECRET` is a Worker
+secret, set per environment with `wrangler secret put`, and is never committed.
 
 ## Promoting to production
 
@@ -254,9 +284,9 @@ Never commit secrets. Use `.dev.vars` for local values (gitignored) and
 
 ```
 src/worker.js              Entrypoint: routing, health response
-src/auth.js                Password hashing, sessions, cookies
+src/auth.js                Sessions and cookies
+src/oauth.js               Google OAuth2 sign-in, ID token verification
 src/api.js                 Endpoint handlers
-src/ratelimit.js           In-memory auth rate limiter
 migrations/                Schema, applied via wrangler d1 migrations
 scripts/generate-seed.mjs  seed-data.csv -> seed/items.sql
 seed/items.sql             Generated; do not edit by hand
