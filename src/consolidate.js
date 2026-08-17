@@ -95,10 +95,52 @@ export function baseTitleOf(title, allTitles) {
   return allTitles ? collapseToShortestRoot(base, allTitles) : base;
 }
 
+/**
+ * Hand-authored overrides for exactly the three groupings the mechanical
+ * rules above cannot recover from title text alone. Every other grouping
+ * decision in this file stays fully derived from titles; this map only ever
+ * touches these ten items. Keyed by item id, not title, for the same reason
+ * the chrono seed generator matches by id — several catalogue titles are not
+ * unique, so an id is the only unambiguous key.
+ */
+const GROUP_OVERRIDES = new Map([
+  // Marvel One-Shots: the spreadsheet bundles several unrelated home-video
+  // shorts under one manufactured franchise name. This includes the
+  // one-shot literally titled "Agent Carter" — distinct from the later
+  // Agent Carter TV series, which keeps its own franchise.
+  //
+  // consolidated.csv's own Marvel One-Shots row lists 5 entries, one short
+  // of this list, and its Agent Carter row is 2 (TV seasons only) — the
+  // one-shot appears to have been dropped from the original tally rather
+  // than placed anywhere. Every item must land in some group here, so it
+  // joins the other shorts rather than being silently excluded.
+  [6, "Marvel One-Shots"], // The Consultant
+  [7, "Marvel One-Shots"], // A Funny Thing Happened on the Way to Thor's Hammer
+  [9, "Marvel One-Shots"], // Item 47
+  [11, "Marvel One-Shots"], // Agent Carter (One-Shot)
+  [14, "Marvel One-Shots"], // All Hail the King
+  [58, "Marvel One-Shots"], // Peter's To-Do List
+
+  // Team Thor absorbs Team Darryl, a spin-off short with an unrelated title.
+  // 27 and 31 already merge under the mechanical rules; listed explicitly
+  // anyway so this group stays correct even if those rules change later.
+  [27, "Team Thor"], // Team Thor
+  [31, "Team Thor"], // Team Thor: Part 2
+  [42, "Team Thor"], // Team Darryl
+
+  // Captain Marvel absorbs its own sequel, titled without "Captain Marvel"
+  // anywhere in it.
+  [52, "Captain Marvel"], // Captain Marvel
+  [85, "Captain Marvel"], // The Marvels
+]);
+
 export function consolidateItems(items) {
   const allTitles = items.map((i) => i.title);
 
   const raw = items.map((item) => {
+    if (GROUP_OVERRIDES.has(item.id)) {
+      return { item, base: GROUP_OVERRIDES.get(item.id), unchanged: false };
+    }
     const base = baseTitleOf(item.title, allTitles);
     return { item, base, unchanged: base === item.title };
   });

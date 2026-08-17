@@ -7,6 +7,43 @@
  * rather than being retyped as strings, so the browser runs exactly the code
  * that format.js unit tests cover — there is no second implementation of the
  * runtime formatting to drift out of sync.
+ *
+ * Two things Wrangler's esbuild bundling does to that source text before we
+ * ever see it, both handled by reflect()/normalizeNames() below:
+ *
+ * 1. "keepNames" bookkeeping. Workers bundling preserves Function.name
+ *    through minification/renaming by appending a call like
+ *    `__name(fn, "fn")` immediately after every declaration — including
+ *    ones nested inside another function's body, which become part of that
+ *    outer function's own toString() output. __name itself is defined once,
+ *    at the top of the Worker's OWN bundle; it never ships to the browser,
+ *    so a reflected function that references it throws
+ *    `ReferenceError: __name is not defined` the moment it runs standalone.
+ *    These calls are dead weight outside the bundle and are stripped.
+ *
+ * 2. Identifier renaming for module isolation. Every ui/*.js page file
+ *    calls helpers like formatRuntime() or esc() as bare, un-imported
+ *    references — deliberately, since they are meant to be satisfied by
+ *    the OTHER reflected functions concatenated into the same browser
+ *    <script>, not by any real import graph. esbuild does not know that:
+ *    from its perspective a free reference to `formatRuntime` in
+ *    dashboard.js is a module that never imported it, and per real ES
+ *    module semantics that reference must stay unresolved. Since Wrangler
+ *    bundles every module into one flat top-level scope, the only way
+ *    esbuild can guarantee dashboard.js's free reference keeps failing to
+ *    resolve (as true module isolation requires) is to rename shell.js's
+ *    OWN import binding for formatRuntime out of the way — here, to
+ *    formatRuntime2. fn.name still correctly reports "formatRuntime"
+ *    (that is exactly what keepNames is for), but toString() reflects the
+ *    renamed identifier verbatim, in both the function's own signature and
+ *    any place it calls a similarly-renamed sibling. Left alone, the
+ *    browser would define formatRuntime2 while every page still calls
+ *    formatRuntime(), and it would fail exactly like case 1 — a
+ *    ReferenceError, just for a different function per page depending on
+ *    which helper it happens to call. normalizeNames() rewrites every
+ *    renamed identifier back to the name keepNames says it should be,
+ *    consistently across the whole concatenated script, so cross-function
+ *    calls line up again.
  */
 
 import { STYLES } from "./styles.js";
@@ -124,7 +161,44 @@ async function initSignedInLabel() {
   }
 }
 
-const CLIENT_RUNTIME = [
+/**
+ * Extracts a function's source text with esbuild's keepNames bookkeeping
+ * removed, plus whatever identifier it actually got declared under (which
+ * may differ from fn.name — see the module doc comment above).
+ */
+function reflect(fn) {
+  const src = fn
+    .toString()
+    // Bookkeeping statement injected right after every declaration,
+    // including ones nested inside another function's body:
+    // `__name(someFn, "someFn");`. Matched without line anchors so it is
+    // removed correctly even if minification ever puts it on a shared line
+    // with surrounding code — this project does not currently minify (no
+    // --minify flag in any deploy path), but the fix should not depend on
+    // that staying true.
+    .replace(/\s*__name\([^;]*\);/g, "");
+
+  const m = /^(async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/.exec(src);
+  return { name: fn.name, declaredAs: m ? m[2] : null, src };
+}
+
+/**
+ * Rewrites every identifier that keepNames says was renamed back to its true
+ * name, throughout a whole block of already-concatenated source — including
+ * inside functions whose OWN declaration was not itself renamed, since they
+ * may still call a sibling that was.
+ */
+function normalizeNames(reflected, src) {
+  let out = src;
+  for (const r of reflected) {
+    if (r.declaredAs && r.declaredAs !== r.name) {
+      out = out.replace(new RegExp("\\b" + r.declaredAs + "\\b", "g"), r.name);
+    }
+  }
+  return out;
+}
+
+const RUNTIME_FNS = [
   formatRuntime,
   formatHours,
   isRealDate,
@@ -137,9 +211,12 @@ const CLIENT_RUNTIME = [
   showError,
   initNav,
   initSignedInLabel,
-]
-  .map((fn) => fn.toString())
-  .join("\n\n");
+].map(reflect);
+
+const CLIENT_RUNTIME = normalizeNames(
+  RUNTIME_FNS,
+  RUNTIME_FNS.map((r) => r.src).join("\n\n")
+);
 
 /* ------------------------------------------------------------- rendering -- */
 
@@ -158,7 +235,12 @@ function navHtml(active) {
  * @param {Function} page.main   client entry point, serialised and invoked
  */
 export function renderPage(page) {
-  const script = CLIENT_RUNTIME + "\n\n" + page.main.toString() + "\n\n" + page.main.name + "();";
+  const main = reflect(page.main);
+  // page.main's OWN declaration is never renamed (each page's entry point has
+  // a unique name), but its nested functions can still call a RUNTIME_FNS
+  // sibling that was — normalize against the full set, not just this page.
+  const mainSrc = normalizeNames(RUNTIME_FNS, main.src);
+  const script = CLIENT_RUNTIME + "\n\n" + mainSrc + "\n\n" + main.name + "();";
 
   return `<!doctype html>
 <html lang="en">

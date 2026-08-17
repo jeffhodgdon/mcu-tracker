@@ -18,6 +18,7 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "playwright": "^1.62.1",
     "wrangler": "^4.123.0"
   },
   "allowScripts": {
