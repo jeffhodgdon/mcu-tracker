@@ -21,6 +21,10 @@ import {
   PRIVATE_CACHE_CONTROL,
 } from "./api.js";
 import { handleGoogleCallback, startGoogleAuth } from "./oauth.js";
+import { dashboardPage } from "./ui/dashboard.js";
+import { releasePage } from "./ui/release.js";
+import { isPlaceholder, placeholderPage } from "./ui/placeholder.js";
+import { htmlResponse } from "./ui/shell.js";
 
 export default {
   async fetch(request, env, ctx) {
@@ -30,7 +34,14 @@ export default {
       if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
         return await handleApi(request, env, ctx, url);
       }
-      return await health(request, env, url);
+
+      const page = handlePage(url);
+      if (page) return page;
+
+      // Kept as a plain-text probe now that / serves the UI.
+      if (url.pathname === "/health") return await health(request, env, url);
+
+      return notFoundPage();
     } catch (err) {
       if (err instanceof HttpError) {
         return error(err.message, err.status);
@@ -40,6 +51,33 @@ export default {
     }
   },
 };
+
+/**
+ * The UI lives under /mcu/ as specified. The bare hostname redirects there so
+ * mcu.kjserver.dev is not a dead end — and so the OAuth callback, which lands
+ * on "/", ends up on the dashboard.
+ */
+function handlePage(url) {
+  const path = url.pathname;
+
+  if (path === "/" || path === "/mcu") {
+    return Response.redirect(new URL("/mcu/", url).toString(), 302);
+  }
+  if (path === "/mcu/") return htmlResponse(dashboardPage());
+  if (path === "/mcu/release") return htmlResponse(releasePage());
+
+  const match = /^\/mcu\/([a-z-]+)\/?$/.exec(path);
+  if (match && isPlaceholder(match[1])) return htmlResponse(placeholderPage(match[1]));
+
+  return null;
+}
+
+function notFoundPage() {
+  return new Response("Not found\n", {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" },
+  });
+}
 
 async function handleApi(request, env, ctx, url) {
   const { pathname } = url;
