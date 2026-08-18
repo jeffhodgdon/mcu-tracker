@@ -21,6 +21,7 @@ const BODY = `
     <thead>
       <tr>
         <th style="width:38%;text-align:center">Title</th>
+        <th class="opt" style="text-align:center">Type</th>
         <th class="opt" style="text-align:center">Setting</th>
         <th style="text-align:center">Released</th>
         <th class="num opt" style="text-align:center">Runtime</th>
@@ -28,7 +29,7 @@ const BODY = `
       </tr>
     </thead>
     <tbody id="rows">
-      <tr><td colspan="5" class="muted" style="padding:18px">Loading…</td></tr>
+      <tr><td colspan="6" class="muted" style="padding:18px">Loading…</td></tr>
     </tbody>
   </table>
 </div>
@@ -64,12 +65,13 @@ function otherMain() {
 
   function sectionRow(label, count) {
     return (
-      '<tr class="section"><td colspan="5" style="text-align:center">' + esc(label) + " (" + count + ")</td></tr>"
+      '<tr class="section"><td colspan="6" style="text-align:center">' + esc(label) + " (" + count + ")</td></tr>"
     );
   }
 
   function rowHtml(row) {
     const status = state.statuses.get(row.id) || "unwatched";
+    const type = /Season/.test(row.title || "") ? "TV Series" : "Film";
     return (
       '<tr data-id="' +
       row.id +
@@ -77,6 +79,11 @@ function otherMain() {
       (status === "watched" ? "watched" : "") +
       '"><td><span class="title">' +
       esc(row.title) +
+      "</span></td>" +
+      '<td class="opt"><span class="badge" data-type="' +
+      esc(type) +
+      '">' +
+      esc(type) +
       "</span></td>" +
       '<td class="opt muted">' +
       esc(row.setting || "—") +
@@ -164,7 +171,7 @@ function otherMain() {
       }
     } catch (e) {
       $("rows").innerHTML =
-        '<tr><td colspan="5" class="muted" style="padding:18px">Could not load this page.</td></tr>';
+        '<tr><td colspan="6" class="muted" style="padding:18px">Could not load this page.</td></tr>';
       showError(e.message);
     }
   }

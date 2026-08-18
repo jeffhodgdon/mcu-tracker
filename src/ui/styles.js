@@ -239,6 +239,13 @@ tbody tr.section:hover td { background: var(--bg); }
 .badge.est { border-color: #5a4413; color: var(--accent2); }
 .badge.count { border-color: #4a1f24; color: var(--accent); }
 
+.badge[data-type="Film"] { border-color: #1e4a7a; color: #6ab3ff; }
+.badge[data-type="TV Series"] { border-color: #1e5c3a; color: #5ed492; }
+.badge[data-type="One-Shot"] { border-color: #4a2a7a; color: #b98cff; }
+.badge[data-type="Special Presentation"] { border-color: #1c5c5c; color: #4fd6d6; }
+.badge[data-type="Marvel Television"] { border-color: #7a4a1e; color: #ffab5e; }
+.badge[data-type="Animated Series"] { border-color: #7a2352; color: #ff8fc2; }
+
 .muted { color: var(--muted); }
 .notice {
   background: var(--card-bg); border: 1px solid var(--border);

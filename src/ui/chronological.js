@@ -100,7 +100,9 @@ function chronologicalMain() {
       '<td><span class="title">' +
       esc(item.title) +
       "</span></td>" +
-      '<td class="opt"><span class="badge">' +
+      '<td class="opt"><span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
       esc(item.type) +
       "</span></td>" +
       "<td>" +

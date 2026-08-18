@@ -429,7 +429,9 @@ function dashboardMain() {
       '<td style="text-align:left"><span class="title">' +
       esc(item.title) +
       "</span></td>" +
-      '<td class="opt"><span class="badge">' +
+      '<td class="opt"><span class="badge" data-type="' +
+      esc(typeLabel) +
+      '">' +
       esc(typeLabel) +
       "</span></td>" +
       '<td class="opt">' +
@@ -682,6 +684,7 @@ function dashboardMain() {
         const checked = state.pickerChecked.has(key) ? " checked" : "";
         const runtime = item.runtime_min === null || item.runtime_min === undefined ? "—" : formatRuntime(item.runtime_min);
         const secondary = source === "mcu" ? displayDate(item.release_date) : item.setting || "—";
+        const type = source === "mcu" ? item.type : /Season/.test(item.title || "") ? "TV Series" : "Film";
         return (
           '<label class="row" style="padding:4px 0;gap:8px;text-align:left">' +
           '<input type="checkbox" data-key="' +
@@ -691,6 +694,11 @@ function dashboardMain() {
           ">" +
           '<span style="flex:1;text-align:left">' +
           esc(item.title) +
+          "</span>" +
+          '<span class="badge" data-type="' +
+          esc(type) +
+          '">' +
+          esc(type) +
           "</span>" +
           '<span class="muted" style="font-size:12px;white-space:nowrap">' +
           esc(secondary) +
@@ -826,6 +834,11 @@ function dashboardMain() {
       ">" +
       '<span style="flex:1;text-align:left">' +
       esc(item.title) +
+      "</span>" +
+      '<span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
+      esc(item.type) +
       "</span>" +
       '<span class="muted" style="font-size:12px;white-space:nowrap">' +
       esc(displayDate(item.release_date)) +

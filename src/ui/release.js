@@ -108,7 +108,9 @@ function releaseMain() {
       "</span>" +
       titleExtra +
       "</td>" +
-      '<td class="opt"><span class="badge">' +
+      '<td class="opt"><span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
       esc(item.type) +
       "</span></td>" +
       '<td class="opt muted">' +
@@ -206,7 +208,7 @@ function releaseMain() {
       '<td><span class="collapse-indicator">▶</span> <span class="title">' +
       esc(group.base) +
       "</span></td>" +
-      '<td class="opt"><span class="badge">TV Series</span></td>' +
+      '<td class="opt"><span class="badge" data-type="TV Series">TV Series</span></td>' +
       '<td class="opt muted">' +
       seasonCount +
       " season" +
@@ -249,7 +251,9 @@ function releaseMain() {
       '<td style="padding-left:48px"><span class="title">' +
       esc(item.title) +
       "</span></td>" +
-      '<td class="opt"><span class="badge">' +
+      '<td class="opt"><span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
       esc(item.type) +
       "</span></td>" +
       '<td class="opt muted">' +

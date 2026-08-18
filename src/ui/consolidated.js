@@ -56,7 +56,9 @@ function consolidatedMain() {
       '<td><span class="title">' +
       esc(g.base_title) +
       "</span></td>" +
-      '<td class="opt"><span class="badge">' +
+      '<td class="opt"><span class="badge" data-type="' +
+      esc(g.type || "") +
+      '">' +
       esc(g.type || "—") +
       "</span></td>" +
       "<td>" +
