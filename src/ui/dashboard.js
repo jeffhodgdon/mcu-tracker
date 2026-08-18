@@ -52,6 +52,32 @@ const BODY = `
 
     <button type="button" id="countdown-set-btn" class="hide" style="margin-top:10px">Set a countdown</button>
   </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">My Watch List</h2>
+      <button type="button" id="watchlist-build-btn">Build Watch List</button>
+    </div>
+
+    <div id="watchlist-empty" class="stat-note hide" style="margin-top:12px">
+      Nothing on your watch list yet — click <strong>Build Watch List</strong> to add items.
+    </div>
+
+    <div class="card" id="watchlist-table-wrap" style="padding:0;overflow:hidden;margin-top:14px">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:44%">Title</th>
+            <th class="opt">Type</th>
+            <th class="num">Runtime</th>
+            <th style="width:130px">Status</th>
+            <th style="width:36px"></th>
+          </tr>
+        </thead>
+        <tbody id="watchlist-rows"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <div id="countdown-modal-overlay" class="hide" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px">
@@ -74,29 +100,134 @@ const BODY = `
     <div class="upcoming" id="upcoming"></div>
   </div>
 </div>
+
+<div id="watchlist-modal-overlay" class="hide" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px">
+  <div id="watchlist-modal" class="card" style="max-width:640px;width:100%;max-height:85vh;overflow:auto">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Build Watch List</h2>
+      <button type="button" id="watchlist-modal-close" aria-label="Close" style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px 6px">✕</button>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <label class="muted" style="font-size:13px" for="watchlist-sort">Sort by</label>
+      <select id="watchlist-sort" aria-label="Sort order">
+        <option value="release">Release Date</option>
+        <option value="chronological">Chronological</option>
+      </select>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button type="button" data-quick="all">All</button>
+      <button type="button" data-quick="films">Films Only</button>
+      <button type="button" data-quick="shows">Shows Only</button>
+      <button type="button" data-quick="sacred">Sacred Timeline</button>
+      <label class="switch" style="margin-left:auto">
+        <input type="checkbox" id="watchlist-include-other">
+        <span class="muted" style="font-size:13px">Include Other Universes</span>
+      </label>
+    </div>
+
+    <div class="stat-note" id="watchlist-modal-status" style="margin-top:8px"></div>
+
+    <div id="watchlist-picker" style="margin-top:12px"></div>
+
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button type="button" id="watchlist-cancel-btn">Cancel</button>
+      <button type="button" id="watchlist-submit-btn">Save Watch List</button>
+    </div>
+  </div>
+</div>
 `;
 
 function dashboardMain() {
-  const state = { items: [], statuses: new Map(), settings: null };
+  const TV_TYPES = ["TV Series", "Marvel Television", "Animated Series"];
+  const MCU_TYPE_ORDER = [
+    "Film",
+    "One-Shot",
+    "TV Series",
+    "Marvel Television",
+    "Animated Series",
+    "Special Presentation",
+  ];
+
+  const state = {
+    items: [],
+    otherItems: [],
+    statuses: new Map(),
+    settings: null,
+    watchlist: [],
+    pickerChecked: new Set(),
+  };
 
   function $(id) {
     return document.getElementById(id);
   }
 
+  function wlKey(source, id) {
+    return source + ":" + id;
+  }
+
+  function findItem(source, id) {
+    const list = source === "other" ? state.otherItems : state.items;
+    return list.find((i) => i.id === id) || null;
+  }
+
+  // shell.js only exposes apiGet/apiPut as shared runtime helpers — the
+  // watchlist needs POST and DELETE too, so those live here rather than
+  // touching the shared file for a page-local need.
+  async function apiPost(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = res.status;
+      try {
+        detail = (await res.json()).error || detail;
+      } catch (e) {}
+      throw new Error(String(detail));
+    }
+    return res.json();
+  }
+
+  async function apiDelete(path) {
+    const res = await fetch(path, { method: "DELETE", credentials: "same-origin" });
+    if (!res.ok) {
+      let detail = res.status;
+      try {
+        detail = (await res.json()).error || detail;
+      } catch (e) {}
+      throw new Error(String(detail));
+    }
+    return res.json();
+  }
+
+  // Stats are scoped to the watch list, not the whole 117-item catalogue —
+  // "other" source entries are excluded because watch_status only tracks
+  // items(id) (see the "other" source's disabled status cell above, same
+  // underlying limitation).
   function computeTotals() {
     let watched = 0;
     let remainingMinutes = 0;
     let unknownRuntime = 0;
+    let total = 0;
 
-    for (const item of state.items) {
-      const status = state.statuses.get(item.id) || "unwatched";
+    for (const entry of state.watchlist) {
+      if (entry.source !== "mcu") continue;
+      const item = findItem(entry.source, entry.item_id);
+      if (!item) continue;
+
+      total++;
+      const status = state.statuses.get(entry.item_id) || "unwatched";
       if (status === "watched") watched++;
       if (countsAsRemaining(status)) {
         if (typeof item.runtime_min === "number") remainingMinutes += item.runtime_min;
         else unknownRuntime++;
       }
     }
-    return { watched, remainingMinutes, unknownRuntime, total: state.items.length };
+    return { watched, remainingMinutes, unknownRuntime, total };
   }
 
   function renderStats() {
@@ -104,19 +235,28 @@ function dashboardMain() {
     const pct = t.total ? Math.round((t.watched / t.total) * 100) : 0;
 
     $("stat-watched").textContent = t.watched + " / " + t.total;
-    $("stat-watched-note").textContent = pct + "% of the catalogue";
+    $("stat-watched-note").textContent = t.total
+      ? pct + "% of your watch list"
+      : "Add items to your watch list to track progress";
     $("progress-bar").style.width = pct + "%";
 
     $("stat-remaining").textContent = formatRuntime(t.remainingMinutes);
-    $("stat-remaining-note").textContent =
-      t.unknownRuntime > 0
-        ? t.unknownRuntime + " unwatched item(s) have no runtime yet"
-        : "Across everything not watched or skipped";
+    $("stat-remaining-note").textContent = !t.total
+      ? "Nothing on your watch list yet"
+      : t.unknownRuntime > 0
+      ? t.unknownRuntime + " unwatched item(s) have no runtime yet"
+      : "Across your watch list, not watched or skipped";
 
     renderPace(t);
   }
 
   function renderPace(t) {
+    if (!t.total) {
+      $("stat-pace").textContent = "—";
+      $("stat-pace-note").textContent = "Add items to your watch list to see a pace";
+      return;
+    }
+
     const target = state.settings && state.settings.countdown_target_date;
     const days = target ? daysUntil(target) : null;
 
@@ -233,6 +373,399 @@ function dashboardMain() {
     $("countdown-modal-overlay").classList.add("hide");
   }
 
+  /* ------------------------------------------------------- watch list card */
+
+  function watchlistRowHtml(entry, child) {
+    const item = findItem(entry.source, entry.item_id);
+    if (!item) return "";
+
+    const key = wlKey(entry.source, entry.item_id);
+    const status = entry.source === "mcu" ? state.statuses.get(entry.item_id) || "unwatched" : null;
+    const typeLabel = entry.source === "mcu" ? item.type : item.universe || "Other";
+    const runtime =
+      item.runtime_min === null || item.runtime_min === undefined
+        ? '<span class="muted">—</span>'
+        : formatRuntime(item.runtime_min);
+
+    const statusCell =
+      entry.source === "mcu"
+        ? '<input type="checkbox" class="watchlist-watched-toggle" data-key="' +
+          esc(key) +
+          '" data-id="' +
+          item.id +
+          '"' +
+          (status === "watched" ? " checked" : "") +
+          ' aria-label="Mark watched">'
+        : '<span class="muted" title="Watch status is not tracked for Other Universes items">—</span>';
+
+    const classes = [];
+    if (status === "watched") classes.push("watched");
+    if (child) classes.push("tv-child", "hide");
+
+    return (
+      '<tr data-key="' +
+      esc(key) +
+      '" data-group="' +
+      (child ? "watched" : "") +
+      '" class="' +
+      classes.join(" ") +
+      '">' +
+      '<td style="text-align:left"><span class="title">' +
+      esc(item.title) +
+      "</span></td>" +
+      '<td class="opt"><span class="badge">' +
+      esc(typeLabel) +
+      "</span></td>" +
+      '<td class="num">' +
+      runtime +
+      "</td>" +
+      "<td>" +
+      statusCell +
+      "</td>" +
+      '<td><button type="button" class="watchlist-remove" data-key="' +
+      esc(key) +
+      '" aria-label="Remove from watch list" title="Remove from watch list" style="background:none;border:none;cursor:pointer;font-size:14px">✕</button></td>' +
+      "</tr>"
+    );
+  }
+
+  function watchedGroupParentHtml(count) {
+    return (
+      '<tr class="tv-parent" data-group="watched-parent" style="cursor:pointer">' +
+      '<td style="text-align:left"><span class="collapse-indicator">▶</span> <span class="title">Watched (' +
+      count +
+      ")</span></td>" +
+      '<td class="opt"></td>' +
+      '<td class="num"></td>' +
+      "<td></td>" +
+      "<td></td>" +
+      "</tr>"
+    );
+  }
+
+  function renderWatchlistTable() {
+    if (!state.watchlist.length) {
+      $("watchlist-empty").classList.remove("hide");
+      $("watchlist-table-wrap").classList.add("hide");
+      return;
+    }
+    $("watchlist-empty").classList.add("hide");
+    $("watchlist-table-wrap").classList.remove("hide");
+
+    const unwatched = [];
+    const watched = [];
+    for (const entry of state.watchlist) {
+      const item = findItem(entry.source, entry.item_id);
+      if (!item) continue;
+      const status = entry.source === "mcu" ? state.statuses.get(entry.item_id) || "unwatched" : "unwatched";
+      (status === "watched" ? watched : unwatched).push(entry);
+    }
+
+    let html = unwatched.map((e) => watchlistRowHtml(e, false)).join("");
+    if (watched.length) {
+      html += watchedGroupParentHtml(watched.length);
+      html += watched.map((e) => watchlistRowHtml(e, true)).join("");
+    }
+
+    $("watchlist-rows").innerHTML =
+      html || '<tr><td colspan="5" class="muted" style="padding:14px">Nothing here.</td></tr>';
+
+    for (const cb of $("watchlist-rows").querySelectorAll("input.watchlist-watched-toggle")) {
+      cb.addEventListener("change", onWatchlistWatchedToggle);
+    }
+    for (const btn of $("watchlist-rows").querySelectorAll(".watchlist-remove")) {
+      btn.addEventListener("click", onWatchlistRemove);
+    }
+    const parent = $("watchlist-rows").querySelector('tr.tv-parent[data-group="watched-parent"]');
+    if (parent) parent.addEventListener("click", onWatchedGroupToggle);
+  }
+
+  function onWatchedGroupToggle(ev) {
+    if (ev.target.closest("select") || ev.target.closest("button")) return;
+    const tr = ev.currentTarget;
+    const expanded = tr.classList.toggle("expanded");
+    const indicator = tr.querySelector(".collapse-indicator");
+    if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+    for (const child of $("watchlist-rows").querySelectorAll('tr.tv-child[data-group="watched"]')) {
+      child.classList.toggle("hide", !expanded);
+    }
+  }
+
+  async function onWatchlistWatchedToggle(ev) {
+    const checkbox = ev.target;
+    const id = Number(checkbox.getAttribute("data-id"));
+    const previous = state.statuses.get(id) || "unwatched";
+    const next = checkbox.checked ? "watched" : "unwatched";
+
+    checkbox.disabled = true;
+    try {
+      await apiPut("/api/watch-status/" + id, { status: next });
+      state.statuses.set(id, next);
+      renderStats();
+      renderWatchlistTable();
+    } catch (e) {
+      checkbox.checked = previous === "watched";
+      checkbox.disabled = false;
+      showError("Could not save that change: " + e.message);
+    }
+  }
+
+  async function onWatchlistRemove(ev) {
+    const btn = ev.currentTarget;
+    const key = btn.getAttribute("data-key");
+    const entry = state.watchlist.find((e) => wlKey(e.source, e.item_id) === key);
+    if (!entry) return;
+
+    btn.disabled = true;
+    try {
+      await apiDelete(
+        "/api/watchlist/" + entry.item_id + "?source=" + encodeURIComponent(entry.source)
+      );
+      state.watchlist = state.watchlist.filter((e) => e !== entry);
+      renderWatchlistTable();
+      renderStats();
+    } catch (e) {
+      btn.disabled = false;
+      showError("Could not remove that item: " + e.message);
+    }
+  }
+
+  /* --------------------------------------------------- build watchlist modal */
+
+  function mcuTypeGroups() {
+    const byType = new Map();
+    for (const item of state.items) {
+      if (!byType.has(item.type)) byType.set(item.type, []);
+      byType.get(item.type).push(item);
+    }
+    const types = [...byType.keys()].sort((a, b) => {
+      const ai = MCU_TYPE_ORDER.indexOf(a);
+      const bi = MCU_TYPE_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+    return types.map((t) => ({ type: t, items: byType.get(t) }));
+  }
+
+  function sortByChronoOrder(items) {
+    return items.slice().sort((a, b) => {
+      const ao = a.chrono_order;
+      const bo = b.chrono_order;
+      if (ao === null || ao === undefined) return bo === null || bo === undefined ? a.id - b.id : 1;
+      if (bo === null || bo === undefined) return -1;
+      return ao - bo;
+    });
+  }
+
+  function sortByReleaseDate(items) {
+    return items.slice().sort((a, b) => {
+      if (!a.release_date && !b.release_date) return a.id - b.id;
+      if (!a.release_date) return 1;
+      if (!b.release_date) return -1;
+      if (a.release_date === b.release_date) return a.id - b.id;
+      return a.release_date < b.release_date ? -1 : 1;
+    });
+  }
+
+  function earliestReleaseDate(items) {
+    let earliest = null;
+    for (const item of items) {
+      if (!item.release_date) continue;
+      if (earliest === null || item.release_date < earliest) earliest = item.release_date;
+    }
+    return earliest;
+  }
+
+  // Per-type groups (same shape as chronological mode), each sorted by
+  // release_date, with Other Universes as its own group — there is no type
+  // field on other_universes rows to split it into Film/TV Series/etc, so it
+  // stays one group, but positioned among the others by its own earliest
+  // release date instead of pinned to the bottom.
+  function releaseModeGroups(includeOther) {
+    const groups = mcuTypeGroups().map((g) => ({
+      label: g.type,
+      entries: sortByReleaseDate(g.items).map((item) => ({ item, source: "mcu" })),
+    }));
+
+    if (includeOther && state.otherItems.length) {
+      groups.push({
+        label: "Other Universes",
+        entries: sortByReleaseDate(state.otherItems).map((item) => ({ item, source: "other" })),
+      });
+    }
+
+    groups.sort((a, b) => {
+      const ad = earliestReleaseDate(a.entries.map((e) => e.item));
+      const bd = earliestReleaseDate(b.entries.map((e) => e.item));
+      if (!ad && !bd) return 0;
+      if (!ad) return 1;
+      if (!bd) return -1;
+      return ad < bd ? -1 : ad > bd ? 1 : 0;
+    });
+
+    return groups;
+  }
+
+  function pickerGroupHtml(label, entries) {
+    if (!entries.length) return "";
+    const rows = entries
+      .map(({ item, source }) => {
+        const key = wlKey(source, item.id);
+        const checked = state.pickerChecked.has(key) ? " checked" : "";
+        const runtime = item.runtime_min === null || item.runtime_min === undefined ? "—" : formatRuntime(item.runtime_min);
+        const secondary = source === "mcu" ? displayDate(item.release_date) : item.setting || "—";
+        return (
+          '<label class="row" style="padding:4px 0;gap:8px;text-align:left">' +
+          '<input type="checkbox" data-key="' +
+          esc(key) +
+          '"' +
+          checked +
+          ">" +
+          '<span style="flex:1;text-align:left">' +
+          esc(item.title) +
+          "</span>" +
+          '<span class="muted" style="font-size:12px;white-space:nowrap">' +
+          esc(secondary) +
+          " · " +
+          runtime +
+          "</span>" +
+          "</label>"
+        );
+      })
+      .join("");
+
+    return (
+      '<div class="picker-group" style="margin-bottom:10px;text-align:left">' +
+      '<div class="picker-group-header" style="cursor:pointer;font-weight:600;padding:6px 0">' +
+      '<span class="collapse-indicator">▶</span> ' +
+      esc(label) +
+      " (" +
+      entries.length +
+      ")</div>" +
+      '<div class="picker-group-body hide" style="padding-left:20px">' +
+      rows +
+      "</div>" +
+      "</div>"
+    );
+  }
+
+  function renderPicker() {
+    const mode = $("watchlist-sort").value;
+    const includeOther = $("watchlist-include-other").checked;
+
+    let html = "";
+    if (mode === "release") {
+      for (const group of releaseModeGroups(includeOther)) {
+        html += pickerGroupHtml(group.label, group.entries);
+      }
+    } else {
+      for (const group of mcuTypeGroups()) {
+        const entries = sortByChronoOrder(group.items).map((item) => ({ item, source: "mcu" }));
+        html += pickerGroupHtml(group.type, entries);
+      }
+      if (includeOther) {
+        const others = state.otherItems.slice().sort((a, b) => (a.title < b.title ? -1 : 1));
+        html += pickerGroupHtml(
+          "Other Universes",
+          others.map((item) => ({ item, source: "other" }))
+        );
+      }
+    }
+    $("watchlist-picker").innerHTML = html;
+
+    for (const header of $("watchlist-picker").querySelectorAll(".picker-group-header")) {
+      header.addEventListener("click", onPickerGroupToggle);
+    }
+    for (const cb of $("watchlist-picker").querySelectorAll('input[type="checkbox"]')) {
+      cb.addEventListener("change", onPickerCheckboxChange);
+    }
+  }
+
+  function onPickerGroupToggle(ev) {
+    const header = ev.currentTarget;
+    const body = header.nextElementSibling;
+    const nowHidden = body.classList.toggle("hide");
+    const indicator = header.querySelector(".collapse-indicator");
+    if (indicator) indicator.textContent = nowHidden ? "▶" : "▼";
+  }
+
+  function onPickerCheckboxChange(ev) {
+    const cb = ev.target;
+    const key = cb.getAttribute("data-key");
+    if (cb.checked) state.pickerChecked.add(key);
+    else state.pickerChecked.delete(key);
+  }
+
+  function applyQuickSelect(kind) {
+    const includeOther = $("watchlist-include-other").checked;
+    const next = new Set();
+
+    if (kind === "all") {
+      for (const item of state.items) next.add(wlKey("mcu", item.id));
+      if (includeOther) for (const item of state.otherItems) next.add(wlKey("other", item.id));
+    } else if (kind === "films") {
+      for (const item of state.items) {
+        if (item.type === "Film") next.add(wlKey("mcu", item.id));
+      }
+    } else if (kind === "shows") {
+      for (const item of state.items) {
+        if (TV_TYPES.indexOf(item.type) !== -1) next.add(wlKey("mcu", item.id));
+      }
+    } else if (kind === "sacred") {
+      for (const item of state.items) next.add(wlKey("mcu", item.id));
+    }
+
+    state.pickerChecked = next;
+    renderPicker();
+  }
+
+  function openWatchlistModal() {
+    state.pickerChecked = new Set(state.watchlist.map((e) => wlKey(e.source, e.item_id)));
+    $("watchlist-modal-status").textContent = "";
+    $("watchlist-sort").value = "release";
+    $("watchlist-include-other").checked = state.watchlist.some((e) => e.source === "other");
+    renderPicker();
+    $("watchlist-modal-overlay").classList.remove("hide");
+  }
+
+  function closeWatchlistModal() {
+    $("watchlist-modal-overlay").classList.add("hide");
+  }
+
+  async function submitWatchlist() {
+    const includeOther = $("watchlist-include-other").checked;
+    const items = [];
+    for (const key of state.pickerChecked) {
+      const idx = key.indexOf(":");
+      const source = key.slice(0, idx);
+      const id = Number(key.slice(idx + 1));
+      if (source === "other" && !includeOther) continue;
+      items.push({ item_id: id, source: source });
+    }
+
+    const statusBox = $("watchlist-modal-status");
+    if (!items.length) {
+      statusBox.textContent = "Select at least one item.";
+      return;
+    }
+
+    statusBox.textContent = "Saving…";
+    $("watchlist-submit-btn").disabled = true;
+    try {
+      const res = await apiPost("/api/watchlist", { items });
+      state.watchlist = res.watchlist;
+      renderWatchlistTable();
+      renderStats();
+      closeWatchlistModal();
+    } catch (e) {
+      statusBox.textContent = "Could not save: " + e.message;
+    } finally {
+      $("watchlist-submit-btn").disabled = false;
+    }
+  }
+
   async function main() {
     initNav();
     const me = await initSignedInLabel();
@@ -246,14 +779,18 @@ function dashboardMain() {
     $("signed-in").classList.remove("hide");
 
     try {
-      const [items, watch, settings] = await Promise.all([
+      const [items, watch, settings, otherUniverses, watchlist] = await Promise.all([
         apiGet("/api/items"),
         apiGet("/api/watch-status"),
         apiGet("/api/settings"),
+        apiGet("/api/other-universes"),
+        apiGet("/api/watchlist"),
       ]);
 
       state.items = items.data.items;
+      state.otherItems = (otherUniverses.data && otherUniverses.data.other_universes) || [];
       state.settings = settings.data ? settings.data.settings : {};
+      state.watchlist = (watchlist.data && watchlist.data.watchlist) || [];
       for (const row of (watch.data && watch.data.watch_status) || []) {
         state.statuses.set(row.item_id, row.status);
       }
@@ -266,6 +803,7 @@ function dashboardMain() {
       renderStats();
       renderCountdown();
       renderUpcoming();
+      renderWatchlistTable();
 
       $("countdown-edit-btn").addEventListener("click", openCountdownModal);
       $("countdown-set-btn").addEventListener("click", openCountdownModal);
@@ -286,6 +824,21 @@ function dashboardMain() {
         $("countdown-label").value = "";
         saveSettings(null, null);
       });
+
+      $("watchlist-build-btn").addEventListener("click", openWatchlistModal);
+      $("watchlist-modal-close").addEventListener("click", closeWatchlistModal);
+      $("watchlist-cancel-btn").addEventListener("click", closeWatchlistModal);
+      $("watchlist-submit-btn").addEventListener("click", submitWatchlist);
+      $("watchlist-modal-overlay").addEventListener("click", function (ev) {
+        if (ev.target === $("watchlist-modal-overlay")) closeWatchlistModal();
+      });
+      $("watchlist-sort").addEventListener("change", renderPicker);
+      $("watchlist-include-other").addEventListener("change", renderPicker);
+      for (const btn of document.querySelectorAll("#watchlist-modal [data-quick]")) {
+        btn.addEventListener("click", function () {
+          applyQuickSelect(btn.getAttribute("data-quick"));
+        });
+      }
     } catch (e) {
       showError("Could not load your data: " + e.message);
     }

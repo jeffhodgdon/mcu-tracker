@@ -148,7 +148,10 @@ export async function handleOtherUniverses(request, env) {
       ORDER BY id`
   ).all();
 
-  return json({ other_universes: results });
+  // Flagged so a watchlist form merging this with /api/items can tell the two
+  // id spaces apart — other_universes.id is independent of items.id and is
+  // not a valid watchlist item_id (the FK only accepts items.id).
+  return json({ other_universes: results.map((r) => ({ ...r, source: "other" })) });
 }
 
 /* ------------------------------------------------------------ watch status */
@@ -251,6 +254,75 @@ export async function handlePutWatchStatus(request, env, user, itemId) {
     .first();
 
   return privateJson({ watch_status: { ...row, episode_progress: parseProgress(row.episode_progress) } });
+}
+
+/* --------------------------------------------------------------- watchlist */
+
+const WATCHLIST_SOURCES = new Set(["mcu", "other"]);
+
+async function selectWatchlist(env, userId) {
+  const { results } = await env.DB.prepare(
+    "SELECT item_id, source FROM watchlist WHERE user_id = ? ORDER BY source, item_id"
+  )
+    .bind(userId)
+    .all();
+  return results.map((r) => ({ item_id: r.item_id, source: r.source }));
+}
+
+export async function handleGetWatchlist(request, env, user) {
+  return privateJson({ watchlist: await selectWatchlist(env, user.user_id) });
+}
+
+export async function handlePostWatchlist(request, env, user) {
+  const body = await readJsonBody(request);
+
+  if (!Array.isArray(body.items) || body.items.length === 0) {
+    return error("items must be a non-empty array of { item_id, source }", 400);
+  }
+
+  const entries = [];
+  for (const raw of body.items) {
+    if (raw === null || typeof raw !== "object") {
+      return error("Each item must be an object with item_id and source", 400);
+    }
+    const id = Number(raw.item_id);
+    if (!Number.isInteger(id) || id < 1) {
+      return error("item_id must be a positive integer", 400);
+    }
+    const source = String(raw.source ?? "mcu");
+    if (!WATCHLIST_SOURCES.has(source)) {
+      return error(`source must be one of: ${[...WATCHLIST_SOURCES].join(", ")}`, 400);
+    }
+    entries.push({ id, source });
+  }
+
+  // INSERT OR IGNORE makes duplicate entries in the batch, and entries
+  // already on the watchlist, silent no-ops rather than errors — the
+  // UNIQUE(user_id, item_id, source) constraint is what "ignores duplicates"
+  // leans on.
+  const statements = entries.map((entry) =>
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO watchlist (user_id, item_id, source) VALUES (?, ?, ?)"
+    ).bind(user.user_id, entry.id, entry.source)
+  );
+  await env.DB.batch(statements);
+
+  return privateJson({ watchlist: await selectWatchlist(env, user.user_id) });
+}
+
+export async function handleDeleteWatchlistItem(request, env, user, itemId, source) {
+  if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
+  if (!WATCHLIST_SOURCES.has(source)) {
+    return error(`source must be one of: ${[...WATCHLIST_SOURCES].join(", ")}`, 400);
+  }
+
+  await env.DB.prepare(
+    "DELETE FROM watchlist WHERE user_id = ? AND item_id = ? AND source = ?"
+  )
+    .bind(user.user_id, itemId, source)
+    .run();
+
+  return privateJson({ ok: true });
 }
 
 /* ---------------------------------------------------------------- settings */

@@ -12,11 +12,14 @@ import { authenticate, readCookie } from "./auth.js";
 import {
   error,
   handleConsolidated,
+  handleDeleteWatchlistItem,
   handleGetSettings,
+  handleGetWatchlist,
   handleGetWatchStatus,
   handleListItems,
   handleLogout,
   handleOtherUniverses,
+  handlePostWatchlist,
   handlePutSettings,
   handlePutWatchStatus,
   HttpError,
@@ -135,6 +138,26 @@ async function handleApi(request, env, ctx, url) {
     if (method !== "PUT") return methodNotAllowed("PUT");
     if (!user) return unauthorized();
     return handlePutWatchStatus(request, env, user, Number(watchMatch[1]));
+  }
+
+  if (pathname === "/api/watchlist") {
+    if (!user) return unauthorized();
+    if (method === "GET") return handleGetWatchlist(request, env, user);
+    if (method === "POST") return handlePostWatchlist(request, env, user);
+    return methodNotAllowed("GET, POST");
+  }
+
+  const watchlistMatch = /^\/api\/watchlist\/(.+)$/.exec(pathname);
+  if (watchlistMatch) {
+    if (method !== "DELETE") return methodNotAllowed("DELETE");
+    if (!user) return unauthorized();
+    return handleDeleteWatchlistItem(
+      request,
+      env,
+      user,
+      Number(watchlistMatch[1]),
+      url.searchParams.get("source") || "mcu"
+    );
   }
 
   if (pathname === "/api/settings") {

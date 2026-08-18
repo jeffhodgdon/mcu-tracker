@@ -94,8 +94,14 @@ a:hover { text-decoration: underline; }
 
 main {
   margin-left: var(--rail);
-  padding: 26px 28px 72px;
-  max-width: 1080px;
+  padding: 26px 2rem 72px;
+}
+
+.content-wrap {
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+  text-align: center;
 }
 
 h1 { font-size: 22px; margin: 0 0 4px; }

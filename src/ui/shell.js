@@ -264,8 +264,10 @@ export function renderPage(page) {
   <div class="rail-foot" id="whoami"></div>
 </nav>
 <main>
+<div class="content-wrap">
 <div class="err hide" id="err"></div>
 ${page.body}
+</div>
 </main>
 <script>
 ${script}
