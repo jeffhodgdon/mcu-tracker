@@ -102,13 +102,13 @@ const BODY = `
 </div>
 
 <div id="watchlist-modal-overlay" class="hide" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px">
-  <div id="watchlist-modal" class="card" style="max-width:640px;width:100%;max-height:85vh;overflow:auto">
-    <div class="row" style="justify-content:space-between">
+  <div id="watchlist-modal" class="card" style="max-width:640px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+    <div class="row" style="justify-content:space-between;flex:none">
       <h2 style="margin:0">Build Watch List</h2>
       <button type="button" id="watchlist-modal-close" aria-label="Close" style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px 6px">✕</button>
     </div>
 
-    <div class="row" style="margin-top:14px">
+    <div class="row" style="margin-top:14px;flex:none">
       <label class="muted" style="font-size:13px" for="watchlist-sort">Sort by</label>
       <select id="watchlist-sort" aria-label="Sort order">
         <option value="release">Release Date</option>
@@ -116,7 +116,7 @@ const BODY = `
       </select>
     </div>
 
-    <div class="row" style="margin-top:10px">
+    <div class="row" style="margin-top:10px;flex:none">
       <button type="button" data-quick="all">All</button>
       <button type="button" data-quick="films">Films Only</button>
       <button type="button" data-quick="shows">Shows Only</button>
@@ -128,11 +128,13 @@ const BODY = `
       </label>
     </div>
 
-    <div class="stat-note" id="watchlist-modal-status" style="margin-top:8px"></div>
+    <div style="flex:1;overflow-y:auto;margin-top:8px">
+      <div class="stat-note" id="watchlist-modal-status"></div>
 
-    <div id="watchlist-picker" style="margin-top:12px"></div>
+      <div id="watchlist-picker" style="margin-top:12px"></div>
+    </div>
 
-    <div class="row" style="justify-content:flex-end;margin-top:16px">
+    <div class="row" style="justify-content:flex-end;margin-top:16px;flex:none">
       <button type="button" id="watchlist-clear-btn">Clear Watch List</button>
       <button type="button" id="watchlist-cancel-btn">Cancel</button>
       <button type="button" id="watchlist-submit-btn">Save Watch List</button>
