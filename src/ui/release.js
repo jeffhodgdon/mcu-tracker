@@ -12,6 +12,20 @@ const BODY = `
 <h1>Release Date Order</h1>
 <p class="sub" id="subtitle">Loading…</p>
 
+<div class="filter-bar" id="filter-bar">
+  <div class="filter-bar-count" id="filter-bar-count">Showing 0 of 0 titles</div>
+  <div class="filter-bar-types">
+    <button type="button" data-filter="Film" aria-pressed="true">Film</button>
+    <button type="button" data-filter="TV Series" aria-pressed="true">TV Series</button>
+    <button type="button" data-filter="One-Shot" aria-pressed="true">One-Shot</button>
+    <button type="button" data-filter="Special Presentation" aria-pressed="true">Special Presentation</button>
+    <button type="button" data-filter="Marvel Television" aria-pressed="true">Marvel Television</button>
+    <button type="button" data-filter="Animated Series" aria-pressed="true">Animated Series</button>
+    <button type="button" class="filter-bar-ghost" id="filter-select-all">Select All</button>
+    <button type="button" class="filter-bar-ghost" id="filter-deselect-all">Deselect All</button>
+  </div>
+</div>
+
 <div id="signed-out" class="notice hide">
   <strong>Sign in to track your progress.</strong>
   <span class="muted">The catalogue below is public; watch status needs an account.</span>
@@ -38,7 +52,7 @@ const BODY = `
 `;
 
 function releaseMain() {
-  const state = { items: [], statuses: new Map(), signedIn: false };
+  const state = { items: [], statuses: new Map(), signedIn: false, activeTypes: new Set() };
 
   function $(id) {
     return document.getElementById(id);
@@ -84,6 +98,8 @@ function releaseMain() {
     return (
       '<tr data-id="' +
       item.id +
+      '" data-type="' +
+      esc(item.type) +
       '" class="' +
       (status === "watched" ? "watched" : "") +
       '">' +
@@ -225,6 +241,8 @@ function releaseMain() {
       item.id +
       '" data-group="' +
       esc(groupKey) +
+      '" data-type="' +
+      esc(item.type) +
       '" class="tv-child hide' +
       (status === "watched" ? " watched" : "") +
       '">' +
@@ -292,6 +310,53 @@ function releaseMain() {
     for (const tr of $("rows").querySelectorAll("tr.tv-parent")) {
       tr.addEventListener("click", onParentToggle);
     }
+
+    applyTypeFilter();
+  }
+
+  // A parent group row has no single type of its own (its badge always reads
+  // "TV Series" even when its seasons are Animated Series/Marvel Television),
+  // so it is filtered by its children instead: hidden only once every season
+  // under it is filtered out, matching "hiding TV Series hides the parent
+  // group row and all its season children" for groups that are purely one
+  // type, while a mixed-type group stays visible as long as any season does.
+  function applyTypeFilter() {
+    let visible = 0;
+    for (const row of $("rows").querySelectorAll("tr[data-type]")) {
+      const shown = state.activeTypes.has(row.getAttribute("data-type"));
+      row.classList.toggle("filtered-out", !shown);
+      if (shown) visible++;
+    }
+    for (const parent of $("rows").querySelectorAll("tr.tv-parent")) {
+      const key = parent.getAttribute("data-group");
+      const children = $("rows").querySelectorAll(
+        'tr.tv-child[data-group="' + key + '"]'
+      );
+      const anyVisible = [...children].some((c) => !c.classList.contains("filtered-out"));
+      parent.classList.toggle("filtered-out", !anyVisible);
+    }
+    $("filter-bar-count").textContent =
+      "Showing " + visible + " of " + state.items.length + " titles";
+  }
+
+  function onFilterToggle(ev) {
+    const btn = ev.currentTarget;
+    const type = btn.getAttribute("data-filter");
+    const nowActive = btn.getAttribute("aria-pressed") !== "true";
+    btn.setAttribute("aria-pressed", nowActive ? "true" : "false");
+    if (nowActive) state.activeTypes.add(type);
+    else state.activeTypes.delete(type);
+    applyTypeFilter();
+  }
+
+  function setAllFilters(active) {
+    for (const btn of $("filter-bar").querySelectorAll("[data-filter]")) {
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+      const type = btn.getAttribute("data-filter");
+      if (active) state.activeTypes.add(type);
+      else state.activeTypes.delete(type);
+    }
+    applyTypeFilter();
   }
 
   function onParentToggle(ev) {
@@ -387,6 +452,17 @@ function releaseMain() {
     state.signedIn = me.signedIn;
 
     if (!state.signedIn) $("signed-out").classList.remove("hide");
+
+    for (const btn of $("filter-bar").querySelectorAll("[data-filter]")) {
+      state.activeTypes.add(btn.getAttribute("data-filter"));
+      btn.addEventListener("click", onFilterToggle);
+    }
+    $("filter-select-all").addEventListener("click", function () {
+      setAllFilters(true);
+    });
+    $("filter-deselect-all").addEventListener("click", function () {
+      setAllFilters(false);
+    });
 
     try {
       const items = await apiGet("/api/items");

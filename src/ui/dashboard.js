@@ -122,14 +122,13 @@ const BODY = `
       <button type="button" data-quick="films">Films Only</button>
       <button type="button" data-quick="shows">Shows Only</button>
       <button type="button" data-quick="sacred">Sacred Timeline</button>
-      <button type="button" data-quick="consolidated">Consolidated</button>
       <label class="switch" style="margin-left:auto">
         <input type="checkbox" id="watchlist-include-other">
         <span class="muted" style="font-size:13px">Include Other Universes</span>
       </label>
     </div>
 
-    <div style="flex:1;overflow-y:auto;margin-top:8px">
+    <div class="watchlist-picker-scroll" style="flex:1;overflow-y:auto;margin-top:8px">
       <div class="stat-note" id="watchlist-modal-status"></div>
 
       <div id="watchlist-picker" style="margin-top:12px"></div>
@@ -162,6 +161,7 @@ function dashboardMain() {
     settings: null,
     watchlist: [],
     pickerChecked: new Set(),
+    consolidatedGroups: [],
   };
 
   function $(id) {
@@ -662,27 +662,16 @@ function dashboardMain() {
     return isRealDate(value) && daysUntil(value) <= 0;
   }
 
-  // Per-type groups (same shape as chronological mode), each sorted by
-  // release_date, in fixed MCU_TYPE_ORDER — with Other Universes as its own
-  // group pinned last, since there is no type field on other_universes rows
-  // to split it into Film/TV Series/etc.
-  function releaseModeGroups(includeOther) {
+  // Per-type groups, each sorted by release_date, in fixed MCU_TYPE_ORDER.
+  // Other Universes is rendered separately by renderPicker so the
+  // Consolidated section can sit between the media-type groups and it.
+  function releaseModeGroups() {
     const mcuItems = state.items.filter(isPastOrPresent);
-    const otherItems = state.otherItems.filter(isPastOrPresent);
 
-    const groups = mcuTypeGroups(mcuItems).map((g) => ({
+    return mcuTypeGroups(mcuItems).map((g) => ({
       label: g.type,
       entries: sortByReleaseDate(g.items).map((item) => ({ item, source: "mcu" })),
     }));
-
-    if (includeOther && otherItems.length) {
-      groups.push({
-        label: "Other Universes",
-        entries: sortByReleaseDate(otherItems).map((item) => ({ item, source: "other" })),
-      });
-    }
-
-    return groups;
   }
 
   function pickerGroupHtml(label, entries) {
@@ -745,8 +734,10 @@ function dashboardMain() {
     const includeOther = $("watchlist-include-other").checked;
 
     let html = "";
+    let otherGroupHtml = "";
+
     if (mode === "release") {
-      for (const group of releaseModeGroups(includeOther)) {
+      for (const group of releaseModeGroups()) {
         html += pickerGroupHtml(group.label, group.entries);
       }
     } else {
@@ -755,22 +746,36 @@ function dashboardMain() {
         const entries = sortByChronoOrder(group.items).map((item) => ({ item, source: "mcu" }));
         html += pickerGroupHtml(group.type, entries);
       }
-      if (includeOther) {
-        const others = state.otherItems.slice().sort((a, b) => (a.title < b.title ? -1 : 1));
-        html += pickerGroupHtml(
-          "Other Universes",
-          others.map((item) => ({ item, source: "other" }))
-        );
-      }
     }
+
+    html += consolidatedSectionHtml();
+
+    if (includeOther) {
+      const others = state.otherItems.filter(isPastOrPresent);
+      const entries =
+        mode === "release"
+          ? sortByReleaseDate(others).map((item) => ({ item, source: "other" }))
+          : others
+              .slice()
+              .sort((a, b) => (a.title < b.title ? -1 : 1))
+              .map((item) => ({ item, source: "other" }));
+      otherGroupHtml = pickerGroupHtml("Other Universes", entries);
+    }
+
+    html += otherGroupHtml;
+
     $("watchlist-picker").innerHTML = html;
 
     for (const header of $("watchlist-picker").querySelectorAll(".picker-group-header")) {
       header.addEventListener("click", onPickerGroupToggle);
     }
-    for (const cb of $("watchlist-picker").querySelectorAll('input[type="checkbox"]')) {
+    for (const cb of $("watchlist-picker").querySelectorAll(
+      '.picker-group-body > label > input[type="checkbox"]:not(.franchise-item-cb)'
+    )) {
       cb.addEventListener("change", onPickerCheckboxChange);
     }
+
+    initConsolidatedSection();
   }
 
   function onPickerGroupToggle(ev) {
@@ -786,10 +791,185 @@ function dashboardMain() {
     const key = cb.getAttribute("data-key");
     if (cb.checked) state.pickerChecked.add(key);
     else state.pickerChecked.delete(key);
+    syncCheckedStateToDom(key, cb.checked);
+  }
+
+  // The flat media-type groups and the Consolidated section each render their
+  // own checkbox element for the same mcu item, both keyed off the same
+  // state.pickerChecked entry — so a change in one view has to be mirrored
+  // onto the other view's element, and the affected franchise's tri-state
+  // parent has to be re-synced, or the two views drift out of sight until the
+  // next full renderPicker() (a quick-select click, sort change, etc).
+  function syncCheckedStateToDom(key, checked) {
+    for (const other of $("watchlist-picker").querySelectorAll(
+      '[data-key="' + esc(key) + '"]'
+    )) {
+      if (other.checked !== checked) other.checked = checked;
+      const groupEl = other.closest(".franchise-group");
+      if (groupEl) syncFranchiseParentCheckbox(groupEl);
+    }
+  }
+
+  /* ---------------------------------------------------- consolidated section */
+
+  function franchiseItemHtml(item) {
+    const key = wlKey("mcu", item.id);
+    const checked = state.pickerChecked.has(key) ? " checked" : "";
+    const runtime =
+      item.runtime_min === null || item.runtime_min === undefined ? "—" : formatRuntime(item.runtime_min);
+    return (
+      '<label class="row" style="padding:4px 0;gap:8px;text-align:left">' +
+      '<input type="checkbox" class="franchise-item-cb" data-key="' +
+      esc(key) +
+      '"' +
+      checked +
+      ">" +
+      '<span style="flex:1;text-align:left">' +
+      esc(item.title) +
+      "</span>" +
+      '<span class="muted" style="font-size:12px;white-space:nowrap">' +
+      esc(displayDate(item.release_date)) +
+      " · " +
+      runtime +
+      "</span>" +
+      "</label>"
+    );
+  }
+
+  function franchiseGroupHtml(group) {
+    const memberItems = group.member_ids.map((id) => findItem("mcu", id)).filter(Boolean);
+    const orderedItems = mcuTypeGroups(memberItems).reduce((acc, g) => acc.concat(g.items), []);
+    if (!orderedItems.length) return "";
+
+    const checkedCount = orderedItems.filter((item) =>
+      state.pickerChecked.has(wlKey("mcu", item.id))
+    ).length;
+
+    const rows = orderedItems.map(franchiseItemHtml).join("");
+
+    return (
+      '<div class="picker-group franchise-group" data-franchise="' +
+      esc(group.base_title) +
+      '" style="margin-bottom:10px;text-align:left">' +
+      '<div class="row franchise-group-header" style="cursor:pointer;gap:8px;padding:6px 0">' +
+      '<input type="checkbox" class="franchise-parent-cb" data-franchise="' +
+      esc(group.base_title) +
+      '">' +
+      '<span class="collapse-indicator">▶</span>' +
+      '<span style="font-weight:600;flex:1">' +
+      esc(group.base_title) +
+      "</span>" +
+      '<span class="muted franchise-count" style="font-size:12px">(' +
+      checkedCount +
+      " selected / " +
+      orderedItems.length +
+      " total)</span>" +
+      "</div>" +
+      '<div class="picker-group-body franchise-items hide">' +
+      rows +
+      "</div>" +
+      "</div>"
+    );
+  }
+
+  function consolidatedSectionHtml() {
+    const rows = state.consolidatedGroups.map(franchiseGroupHtml).join("");
+    return (
+      '<div class="picker-group consolidated-section" style="margin-bottom:10px;text-align:left">' +
+      '<div class="picker-group-header consolidated-section-header" style="cursor:pointer;font-weight:600;padding:6px 0">' +
+      '<span class="collapse-indicator">▶</span> Consolidated' +
+      "</div>" +
+      '<div class="picker-group-body hide" style="padding-left:20px">' +
+      rows +
+      "</div>" +
+      "</div>"
+    );
+  }
+
+  function initConsolidatedSection() {
+    const section = $("watchlist-picker").querySelector(".consolidated-section");
+    if (!section) return;
+
+    for (const group of section.querySelectorAll(".franchise-group")) {
+      syncFranchiseParentCheckbox(group);
+    }
+
+    for (const header of section.querySelectorAll(".franchise-group-header")) {
+      header.addEventListener("click", onFranchiseHeaderClick);
+    }
+    for (const cb of section.querySelectorAll("input.franchise-parent-cb")) {
+      cb.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+      });
+      cb.addEventListener("change", onFranchiseParentChange);
+    }
+    for (const cb of section.querySelectorAll("input.franchise-item-cb")) {
+      cb.addEventListener("change", onFranchiseItemChange);
+    }
+  }
+
+  function syncFranchiseParentCheckbox(groupEl) {
+    const items = groupEl.querySelectorAll("input.franchise-item-cb");
+    const parent = groupEl.querySelector("input.franchise-parent-cb");
+    if (!parent || !items.length) return;
+
+    let checkedCount = 0;
+    for (const cb of items) if (cb.checked) checkedCount++;
+
+    parent.checked = checkedCount === items.length;
+    parent.indeterminate = checkedCount > 0 && checkedCount < items.length;
+
+    const countLabel = groupEl.querySelector(".franchise-count");
+    if (countLabel) {
+      countLabel.textContent = "(" + checkedCount + " selected / " + items.length + " total)";
+    }
+  }
+
+  function onFranchiseHeaderClick(ev) {
+    if (ev.target.closest("input")) return;
+    const header = ev.currentTarget;
+    const body = header.nextElementSibling;
+    const nowHidden = body.classList.toggle("hide");
+    const indicator = header.querySelector(".collapse-indicator");
+    if (indicator) indicator.textContent = nowHidden ? "▶" : "▼";
+  }
+
+  function onFranchiseParentChange(ev) {
+    const parent = ev.target;
+    const groupEl = parent.closest(".franchise-group");
+    const checkAll = parent.checked;
+
+    for (const cb of groupEl.querySelectorAll("input.franchise-item-cb")) {
+      cb.checked = checkAll;
+      const key = cb.getAttribute("data-key");
+      if (checkAll) state.pickerChecked.add(key);
+      else state.pickerChecked.delete(key);
+      syncCheckedStateToDom(key, checkAll);
+    }
+    syncFranchiseParentCheckbox(groupEl);
+  }
+
+  function onFranchiseItemChange(ev) {
+    const cb = ev.target;
+    const key = cb.getAttribute("data-key");
+    if (cb.checked) state.pickerChecked.add(key);
+    else state.pickerChecked.delete(key);
+
+    const groupEl = cb.closest(".franchise-group");
+    if (groupEl) syncFranchiseParentCheckbox(groupEl);
+    syncCheckedStateToDom(key, cb.checked);
+  }
+
+  function markActiveQuickSelect(kind) {
+    for (const btn of document.querySelectorAll("#watchlist-modal [data-quick]")) {
+      btn.setAttribute("aria-pressed", btn.getAttribute("data-quick") === kind ? "true" : "false");
+    }
   }
 
   function applyQuickSelect(kind) {
     const includeOther = $("watchlist-include-other").checked;
+    markActiveQuickSelect(kind);
+
     const next = new Set();
 
     if (kind === "all") {
@@ -805,11 +985,6 @@ function dashboardMain() {
       }
     } else if (kind === "sacred") {
       for (const item of state.items) next.add(wlKey("mcu", item.id));
-    } else if (kind === "consolidated") {
-      // For now this is identical to "all" minus Other Universes — franchise
-      // grouping (collapsing sequels/series into one consolidated entry) is
-      // planned for a future session.
-      for (const item of state.items) next.add(wlKey("mcu", item.id));
     }
 
     state.pickerChecked = next;
@@ -818,6 +993,7 @@ function dashboardMain() {
 
   function openWatchlistModal() {
     state.pickerChecked = new Set(state.watchlist.map((e) => wlKey(e.source, e.item_id)));
+    markActiveQuickSelect(null);
     $("watchlist-modal-status").textContent = "";
     $("watchlist-sort").value = watchlistSortMode();
     $("watchlist-include-other").checked = state.watchlist.some((e) => e.source === "other");
@@ -905,18 +1081,20 @@ function dashboardMain() {
     $("signed-in").classList.remove("hide");
 
     try {
-      const [items, watch, settings, otherUniverses, watchlist] = await Promise.all([
+      const [items, watch, settings, otherUniverses, watchlist, consolidated] = await Promise.all([
         apiGet("/api/items"),
         apiGet("/api/watch-status"),
         apiGet("/api/settings"),
         apiGet("/api/other-universes"),
         apiGet("/api/watchlist"),
+        apiGet("/api/consolidated"),
       ]);
 
       state.items = items.data.items;
       state.otherItems = (otherUniverses.data && otherUniverses.data.other_universes) || [];
       state.settings = settings.data ? settings.data.settings : {};
       state.watchlist = (watchlist.data && watchlist.data.watchlist) || [];
+      state.consolidatedGroups = (consolidated.data && consolidated.data.groups) || [];
       for (const row of (watch.data && watch.data.watch_status) || []) {
         state.statuses.set(wlKey(row.source || "mcu", row.item_id), row.status);
       }
