@@ -14,6 +14,7 @@ import {
   handleConsolidated,
   handleDeleteWatchlistItem,
   handleGetSettings,
+  handleGetStats,
   handleGetWatchlist,
   handleGetWatchStatus,
   handleListItems,
@@ -115,6 +116,10 @@ async function handleApi(request, env, ctx, url) {
 
   if (pathname === "/api/other-universes") {
     return method === "GET" ? handleOtherUniverses(request, env) : methodNotAllowed("GET");
+  }
+
+  if (pathname === "/api/stats") {
+    return method === "GET" ? handleGetStats(request, env) : methodNotAllowed("GET");
   }
 
   // --- authenticated ------------------------------------------------------

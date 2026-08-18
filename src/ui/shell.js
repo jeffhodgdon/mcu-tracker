@@ -155,6 +155,20 @@ async function initSignedInLabel() {
     } else {
       box.innerHTML = '<a class="btn-link" href="/api/auth/google">Sign in with Google</a>';
     }
+
+    try {
+      const stats = await apiGet("/api/stats");
+      const count = stats.data.user_count;
+      const line = document.createElement("div");
+      line.className = "muted";
+      line.style.fontSize = "11px";
+      line.style.marginBottom = "8px";
+      line.textContent = "Users Tracking: " + count;
+      box.insertBefore(line, box.firstChild);
+    } catch (e) {
+      // stats are decorative; skip silently if unavailable
+    }
+
     return me;
   } catch (e) {
     return { signedIn: false, data: null };

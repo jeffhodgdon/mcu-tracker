@@ -333,6 +333,11 @@ export async function handleDeleteWatchlistItem(request, env, user, itemId, sour
 
 /* ---------------------------------------------------------------- settings */
 
+export async function handleGetStats(request, env) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS user_count FROM users").first();
+  return json({ user_count: row.user_count });
+}
+
 export async function handleGetSettings(request, env, user) {
   const row = await env.DB.prepare(
     "SELECT countdown_target_date, countdown_label, watchlist_sort FROM user_settings WHERE user_id = ?"
