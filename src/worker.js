@@ -43,7 +43,7 @@ import { htmlResponse } from "./ui/shell.js";
  * flag column would just be another place this exact list lives. Keyed by
  * users.id (stable across email changes), not email.
  */
-const ADMIN_USER_IDS = [8];
+const ADMIN_USER_IDS = [1, 8];
 
 function isAdmin(user) {
   return !!user && ADMIN_USER_IDS.includes(user.user_id);
