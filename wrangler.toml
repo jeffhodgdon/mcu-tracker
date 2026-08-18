@@ -2,6 +2,9 @@ name = "mcu-tracker"
 main = "src/worker.js"
 compatibility_date = "2026-08-01"
 
+[vars]
+GOOGLE_CLIENT_ID = "65719986772-gaglu6q4orm65usj9g0hpno97k2hgc0m.apps.googleusercontent.com"
+
 [observability]
 enabled = true
 
