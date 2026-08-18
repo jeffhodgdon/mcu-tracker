@@ -116,6 +116,145 @@ function releaseMain() {
     );
   }
 
+  // Strips season-style suffixes ("Title (Season 2)", "Title Season 2",
+  // "Title S2") so seasons of the same show share one group key. Films and
+  // one-shots never match, so they are unaffected.
+  function tvBaseTitle(title) {
+    return title
+      .replace(/\s*\(Season\s+\d+\)\s*$/i, "")
+      .replace(/\s+Season\s+\d+$/i, "")
+      .replace(/\s+S\d+$/i, "")
+      .trim();
+  }
+
+  // Preserves overall release-date order: a group is placed where its first
+  // (earliest) season appears, and later seasons of the same show fold into
+  // that same group instead of getting their own slot.
+  function buildGroups(sorted) {
+    const order = [];
+    const byBase = new Map();
+
+    for (const item of sorted) {
+      const isTv = TV_TYPES.indexOf(item.type) !== -1;
+      if (!isTv) {
+        order.push({ key: "single-" + item.id, isTv: false, items: [item] });
+        continue;
+      }
+
+      const base = tvBaseTitle(item.title);
+      let group = byBase.get(base);
+      if (!group) {
+        group = { key: "tv-" + base, isTv: true, base: base, items: [] };
+        byBase.set(base, group);
+        order.push(group);
+      }
+      group.items.push(item);
+    }
+
+    return order;
+  }
+
+  function parentStatusFor(group) {
+    const statuses = group.items.map(function (it) {
+      return state.statuses.get(it.id) || "unwatched";
+    });
+    return statuses.every(function (s) {
+      return s === statuses[0];
+    })
+      ? statuses[0]
+      : "unwatched";
+  }
+
+  function parentRowHtml(group) {
+    const status = parentStatusFor(group);
+    const allWatched = group.items.every(function (it) {
+      return (state.statuses.get(it.id) || "unwatched") === "watched";
+    });
+    const hasRuntime = group.items.some(function (it) {
+      return it.runtime_min !== null;
+    });
+    const totalRuntime = group.items.reduce(function (sum, it) {
+      return sum + (it.runtime_min || 0);
+    }, 0);
+    const hasEstimate = group.items.some(function (it) {
+      return it.is_estimate;
+    });
+    const seasonCount = group.items.length;
+
+    return (
+      '<tr class="tv-parent' +
+      (allWatched ? " watched" : "") +
+      '" data-group="' +
+      esc(group.key) +
+      '" style="cursor:pointer">' +
+      '<td><span class="collapse-indicator">▶</span> <span class="title">' +
+      esc(group.base) +
+      "</span></td>" +
+      '<td class="opt"><span class="badge">TV Series</span></td>' +
+      '<td class="opt muted">' +
+      seasonCount +
+      " season" +
+      (seasonCount === 1 ? "" : "s") +
+      "</td>" +
+      "<td>—</td>" +
+      '<td class="num">' +
+      (hasRuntime ? formatRuntime(totalRuntime) : '<span class="muted">—</span>') +
+      (hasEstimate
+        ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
+        : "") +
+      "</td>" +
+      '<td><select data-group="' +
+      esc(group.key) +
+      '" class="parent-status"' +
+      (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
+      ">" +
+      statusOptions(status) +
+      "</select></td>" +
+      "</tr>"
+    );
+  }
+
+  function childRowHtml(item, groupKey) {
+    const status = state.statuses.get(item.id) || "unwatched";
+    const estimate = item.is_estimate
+      ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
+      : "";
+
+    return (
+      '<tr data-id="' +
+      item.id +
+      '" data-group="' +
+      esc(groupKey) +
+      '" class="tv-child hide' +
+      (status === "watched" ? " watched" : "") +
+      '">' +
+      '<td><span class="title">' +
+      esc(item.title) +
+      "</span></td>" +
+      '<td class="opt"><span class="badge">' +
+      esc(item.type) +
+      "</span></td>" +
+      '<td class="opt muted">' +
+      esc(item.phase || "—") +
+      "</td>" +
+      "<td>" +
+      esc(displayDate(item.release_date)) +
+      "</td>" +
+      '<td class="num">' +
+      (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
+      estimate +
+      "</td>" +
+      '<td><select data-id="' +
+      item.id +
+      '"' +
+      (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
+      ">" +
+      statusOptions(status) +
+      "</select></td>" +
+      "</tr>"
+    );
+  }
+
   function render() {
     // Sorted on the raw string: catalogue dates are ISO-shaped, and partial
     // placeholders like 2027-07-00 land in the right slot this way. Undated
@@ -128,10 +267,84 @@ function releaseMain() {
       return a.release_date < b.release_date ? -1 : 1;
     });
 
-    $("rows").innerHTML = sorted.map(rowHtml).join("");
+    const groups = buildGroups(sorted);
+    const html = [];
+    state.groups = new Map();
 
-    for (const sel of $("rows").querySelectorAll("select")) {
+    for (const group of groups) {
+      if (group.isTv && group.items.length > 1) {
+        state.groups.set(group.key, group);
+        html.push(parentRowHtml(group));
+        for (const item of group.items) html.push(childRowHtml(item, group.key));
+      } else {
+        html.push(rowHtml(group.items[0]));
+      }
+    }
+
+    $("rows").innerHTML = html.join("");
+
+    for (const sel of $("rows").querySelectorAll("select[data-id]")) {
       sel.addEventListener("change", onStatusChange);
+    }
+    for (const sel of $("rows").querySelectorAll("select.parent-status")) {
+      sel.addEventListener("change", onParentStatusChange);
+    }
+    for (const tr of $("rows").querySelectorAll("tr.tv-parent")) {
+      tr.addEventListener("click", onParentToggle);
+    }
+  }
+
+  function onParentToggle(ev) {
+    if (ev.target.closest("select")) return;
+    const tr = ev.currentTarget;
+    const key = tr.getAttribute("data-group");
+    const expanded = tr.classList.toggle("expanded");
+    const indicator = tr.querySelector(".collapse-indicator");
+    if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+
+    for (const child of $("rows").querySelectorAll("tr.tv-child")) {
+      if (child.getAttribute("data-group") === key) child.classList.toggle("hide", !expanded);
+    }
+  }
+
+  async function onParentStatusChange(ev) {
+    const select = ev.target;
+    const key = select.getAttribute("data-group");
+    const group = state.groups.get(key);
+    if (!group) return;
+
+    const next = select.value;
+    const previous = group.items.map(function (it) {
+      return state.statuses.get(it.id) || "unwatched";
+    });
+
+    select.disabled = true;
+    try {
+      for (const item of group.items) {
+        await apiPut("/api/watch-status/" + item.id, { status: next });
+        state.statuses.set(item.id, next);
+      }
+
+      const parentRow = select.closest("tr");
+      if (parentRow) parentRow.classList.toggle("watched", next === "watched");
+
+      for (const item of group.items) {
+        const childRow = $("rows").querySelector('tr[data-id="' + item.id + '"]');
+        if (!childRow) continue;
+        childRow.classList.toggle("watched", next === "watched");
+        const childSelect = childRow.querySelector("select");
+        if (childSelect) childSelect.value = next;
+      }
+
+      updateSubtitle();
+    } catch (e) {
+      group.items.forEach(function (item, i) {
+        state.statuses.set(item.id, previous[i]);
+      });
+      select.value = parentStatusFor(group);
+      showError("Could not save that change: " + e.message);
+    } finally {
+      select.disabled = !state.signedIn ? true : false;
     }
   }
 

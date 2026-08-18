@@ -42,35 +42,41 @@ const BODY = `
   <div class="card">
     <div class="row" style="justify-content:space-between">
       <h2 style="margin:0">Countdown</h2>
-      <label class="switch">
-        <input type="checkbox" id="countdown-toggle">
-        <span class="muted" style="font-size:13px">Show countdown</span>
-      </label>
+      <button type="button" id="countdown-edit-btn" class="hide" title="Edit countdown" aria-label="Edit countdown" style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px 6px">✏</button>
     </div>
 
-    <div id="countdown-panel" class="hide" style="margin-top:14px">
+    <div id="countdown-summary">
       <div class="stat sm" id="countdown-headline">No target set</div>
       <div class="stat-note" id="countdown-note"></div>
-
-      <div class="row" style="margin-top:14px">
-        <input type="date" id="countdown-date" aria-label="Countdown target date">
-        <input type="text" id="countdown-label" placeholder="Label (optional)" aria-label="Countdown label" style="flex:1;min-width:180px">
-        <button id="countdown-save">Save</button>
-        <button id="countdown-clear">Clear</button>
-      </div>
-      <div class="stat-note" id="countdown-status"></div>
-
-      <h2 style="margin:20px 0 0">Upcoming confirmed releases</h2>
-      <div class="stat-note">Pick one to make it the countdown target.</div>
-      <div class="upcoming" id="upcoming"></div>
     </div>
+
+    <button type="button" id="countdown-set-btn" class="hide" style="margin-top:10px">Set a countdown</button>
+  </div>
+</div>
+
+<div id="countdown-modal-overlay" class="hide" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px">
+  <div id="countdown-modal" class="card" style="max-width:480px;width:100%;max-height:85vh;overflow:auto">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Countdown</h2>
+      <button type="button" id="countdown-modal-close" aria-label="Close" style="background:none;border:none;cursor:pointer;font-size:16px;padding:2px 6px">✕</button>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <input type="date" id="countdown-date" aria-label="Countdown target date">
+      <input type="text" id="countdown-label" placeholder="Label (optional)" aria-label="Countdown label" style="flex:1;min-width:180px">
+      <button id="countdown-save">Save</button>
+      <button id="countdown-clear">Clear</button>
+    </div>
+    <div class="stat-note" id="countdown-status"></div>
+
+    <h2 style="margin:20px 0 0">Upcoming confirmed releases</h2>
+    <div class="stat-note">Pick one to make it the countdown target.</div>
+    <div class="upcoming" id="upcoming"></div>
   </div>
 </div>
 `;
 
 function dashboardMain() {
-  const VISIBILITY_KEY = "mcu.countdown.visible";
-
   const state = { items: [], statuses: new Map(), settings: null };
 
   function $(id) {
@@ -135,6 +141,10 @@ function dashboardMain() {
     const s = state.settings || {};
     const target = s.countdown_target_date;
     const days = target ? daysUntil(target) : null;
+
+    $("countdown-summary").classList.toggle("hide", !target);
+    $("countdown-edit-btn").classList.toggle("hide", !target);
+    $("countdown-set-btn").classList.toggle("hide", !!target);
 
     if (!target) {
       $("countdown-headline").textContent = "No target set";
@@ -208,17 +218,19 @@ function dashboardMain() {
       note.textContent = date ? "Saved." : "Countdown cleared.";
       renderCountdown();
       renderStats();
+      closeCountdownModal();
     } catch (e) {
       note.textContent = "Could not save: " + e.message;
     }
   }
 
-  function setCountdownVisible(visible) {
-    $("countdown-panel").classList.toggle("hide", !visible);
-    $("countdown-toggle").checked = visible;
-    try {
-      localStorage.setItem(VISIBILITY_KEY, visible ? "1" : "0");
-    } catch (e) {}
+  function openCountdownModal() {
+    $("countdown-status").textContent = "";
+    $("countdown-modal-overlay").classList.remove("hide");
+  }
+
+  function closeCountdownModal() {
+    $("countdown-modal-overlay").classList.add("hide");
   }
 
   async function main() {
@@ -251,22 +263,15 @@ function dashboardMain() {
       $("countdown-date").value = state.settings.countdown_target_date || "";
       $("countdown-label").value = state.settings.countdown_label || "";
 
-      let visible = false;
-      try {
-        const stored = localStorage.getItem(VISIBILITY_KEY);
-        // Default to showing it when a target already exists.
-        visible = stored === null ? !!state.settings.countdown_target_date : stored === "1";
-      } catch (e) {
-        visible = !!state.settings.countdown_target_date;
-      }
-      setCountdownVisible(visible);
-
       renderStats();
       renderCountdown();
       renderUpcoming();
 
-      $("countdown-toggle").addEventListener("change", function (ev) {
-        setCountdownVisible(ev.target.checked);
+      $("countdown-edit-btn").addEventListener("click", openCountdownModal);
+      $("countdown-set-btn").addEventListener("click", openCountdownModal);
+      $("countdown-modal-close").addEventListener("click", closeCountdownModal);
+      $("countdown-modal-overlay").addEventListener("click", function (ev) {
+        if (ev.target === $("countdown-modal-overlay")) closeCountdownModal();
       });
       $("countdown-save").addEventListener("click", function () {
         const date = $("countdown-date").value;
