@@ -150,9 +150,9 @@ h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .3px; }
 }
 .card h2 { color: var(--muted); text-transform: uppercase; font-size: 11px; }
 
-.stat { font-size: 30px; font-weight: 700; line-height: 1.15; }
+.stat { font-size: 30px; font-weight: 700; line-height: 1.15; text-align: center; }
 .stat.sm { font-size: 22px; }
-.stat-note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.stat-note { color: var(--muted); font-size: 12px; margin-top: 4px; text-align: center; }
 
 .bar {
   height: 8px; background: var(--bg);
