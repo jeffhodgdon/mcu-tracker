@@ -10,14 +10,6 @@ const BODY = `
 <h1>Consolidated</h1>
 <p class="sub" id="subtitle">Loading…</p>
 
-<div class="notice">
-  Each franchise is one row. Grouping is computed from titles — "(Season N)",
-  colon-subtitled sequels, and numbered sequels are folded together
-  automatically. A few groupings from the original spreadsheet reflect manual
-  judgement (e.g. Marvel One-Shots bundling several unrelated shorts) that a
-  title-text rule cannot recover, so those still appear as separate rows here.
-</div>
-
 <div class="card" style="padding:0;overflow:hidden">
   <table>
     <thead>
