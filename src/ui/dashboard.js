@@ -121,6 +121,7 @@ const BODY = `
       <button type="button" data-quick="films">Films Only</button>
       <button type="button" data-quick="shows">Shows Only</button>
       <button type="button" data-quick="sacred">Sacred Timeline</button>
+      <button type="button" data-quick="consolidated">Consolidated</button>
       <label class="switch" style="margin-left:auto">
         <input type="checkbox" id="watchlist-include-other">
         <span class="muted" style="font-size:13px">Include Other Universes</span>
@@ -132,6 +133,7 @@ const BODY = `
     <div id="watchlist-picker" style="margin-top:12px"></div>
 
     <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button type="button" id="watchlist-clear-btn">Clear Watch List</button>
       <button type="button" id="watchlist-cancel-btn">Cancel</button>
       <button type="button" id="watchlist-submit-btn">Save Watch List</button>
     </div>
@@ -143,11 +145,11 @@ function dashboardMain() {
   const TV_TYPES = ["TV Series", "Marvel Television", "Animated Series"];
   const MCU_TYPE_ORDER = [
     "Film",
-    "One-Shot",
     "TV Series",
+    "One-Shot",
+    "Special Presentation",
     "Marvel Television",
     "Animated Series",
-    "Special Presentation",
   ];
 
   const state = {
@@ -532,9 +534,9 @@ function dashboardMain() {
 
   /* --------------------------------------------------- build watchlist modal */
 
-  function mcuTypeGroups() {
+  function mcuTypeGroups(items) {
     const byType = new Map();
-    for (const item of state.items) {
+    for (const item of items || state.items) {
       if (!byType.has(item.type)) byType.set(item.type, []);
       byType.get(item.type).push(item);
     }
@@ -569,41 +571,46 @@ function dashboardMain() {
     });
   }
 
-  function earliestReleaseDate(items) {
-    let earliest = null;
-    for (const item of items) {
-      if (!item.release_date) continue;
-      if (earliest === null || item.release_date < earliest) earliest = item.release_date;
-    }
-    return earliest;
+  // other_universes.release_date may be a bare year ("1986") rather than a
+  // full ISO date ("1986-08-01") — normalize so string comparison against
+  // full dates still orders correctly.
+  function normalizeDateKey(value) {
+    if (/^\d{4}$/.test(value)) return value + "-01-01";
+    return value;
+  }
+
+  // Only real past/present dates are usable as a watch-list anchor: null,
+  // partial placeholders ("2027-07-00"), and future dates are excluded.
+  // other_universes rows may carry a bare year ("1986") rather than a full
+  // ISO date, which isRealDate() rejects outright — normalize to a full date
+  // first so those still pass the check. Shared by both the Release Date and
+  // Chronological picker modes.
+  function isPastOrPresent(item) {
+    const value = /^\d{4}$/.test(item.release_date || "")
+      ? normalizeDateKey(item.release_date)
+      : item.release_date;
+    return isRealDate(value) && daysUntil(value) <= 0;
   }
 
   // Per-type groups (same shape as chronological mode), each sorted by
-  // release_date, with Other Universes as its own group — there is no type
-  // field on other_universes rows to split it into Film/TV Series/etc, so it
-  // stays one group, but positioned among the others by its own earliest
-  // release date instead of pinned to the bottom.
+  // release_date, in fixed MCU_TYPE_ORDER — with Other Universes as its own
+  // group pinned last, since there is no type field on other_universes rows
+  // to split it into Film/TV Series/etc.
   function releaseModeGroups(includeOther) {
-    const groups = mcuTypeGroups().map((g) => ({
+    const mcuItems = state.items.filter(isPastOrPresent);
+    const otherItems = state.otherItems.filter(isPastOrPresent);
+
+    const groups = mcuTypeGroups(mcuItems).map((g) => ({
       label: g.type,
       entries: sortByReleaseDate(g.items).map((item) => ({ item, source: "mcu" })),
     }));
 
-    if (includeOther && state.otherItems.length) {
+    if (includeOther && otherItems.length) {
       groups.push({
         label: "Other Universes",
-        entries: sortByReleaseDate(state.otherItems).map((item) => ({ item, source: "other" })),
+        entries: sortByReleaseDate(otherItems).map((item) => ({ item, source: "other" })),
       });
     }
-
-    groups.sort((a, b) => {
-      const ad = earliestReleaseDate(a.entries.map((e) => e.item));
-      const bd = earliestReleaseDate(b.entries.map((e) => e.item));
-      if (!ad && !bd) return 0;
-      if (!ad) return 1;
-      if (!bd) return -1;
-      return ad < bd ? -1 : ad > bd ? 1 : 0;
-    });
 
     return groups;
   }
@@ -661,7 +668,8 @@ function dashboardMain() {
         html += pickerGroupHtml(group.label, group.entries);
       }
     } else {
-      for (const group of mcuTypeGroups()) {
+      const mcuItems = state.items.filter(isPastOrPresent);
+      for (const group of mcuTypeGroups(mcuItems)) {
         const entries = sortByChronoOrder(group.items).map((item) => ({ item, source: "mcu" }));
         html += pickerGroupHtml(group.type, entries);
       }
@@ -715,6 +723,11 @@ function dashboardMain() {
       }
     } else if (kind === "sacred") {
       for (const item of state.items) next.add(wlKey("mcu", item.id));
+    } else if (kind === "consolidated") {
+      // For now this is identical to "all" minus Other Universes — franchise
+      // grouping (collapsing sequels/series into one consolidated entry) is
+      // planned for a future session.
+      for (const item of state.items) next.add(wlKey("mcu", item.id));
     }
 
     state.pickerChecked = next;
@@ -732,6 +745,36 @@ function dashboardMain() {
 
   function closeWatchlistModal() {
     $("watchlist-modal-overlay").classList.add("hide");
+  }
+
+  async function clearWatchlist() {
+    const statusBox = $("watchlist-modal-status");
+    if (!state.watchlist.length) {
+      closeWatchlistModal();
+      return;
+    }
+    if (!confirm("Remove all items from your watch list?")) return;
+
+    statusBox.textContent = "Clearing…";
+    $("watchlist-clear-btn").disabled = true;
+    try {
+      for (const entry of state.watchlist) {
+        if (entry.source === "mcu") {
+          await apiPut("/api/watch-status/" + entry.item_id, { status: "unwatched" });
+          state.statuses.set(entry.item_id, "unwatched");
+        }
+        await apiDelete("/api/watchlist/" + entry.item_id + "?source=" + entry.source);
+      }
+      state.watchlist = [];
+      state.pickerChecked = new Set();
+      renderWatchlistTable();
+      renderStats();
+      closeWatchlistModal();
+    } catch (e) {
+      statusBox.textContent = "Could not clear: " + e.message;
+    } finally {
+      $("watchlist-clear-btn").disabled = false;
+    }
   }
 
   async function submitWatchlist() {
@@ -829,6 +872,7 @@ function dashboardMain() {
       $("watchlist-modal-close").addEventListener("click", closeWatchlistModal);
       $("watchlist-cancel-btn").addEventListener("click", closeWatchlistModal);
       $("watchlist-submit-btn").addEventListener("click", submitWatchlist);
+      $("watchlist-clear-btn").addEventListener("click", clearWatchlist);
       $("watchlist-modal-overlay").addEventListener("click", function (ev) {
         if (ev.target === $("watchlist-modal-overlay")) closeWatchlistModal();
       });

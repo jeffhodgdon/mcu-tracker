@@ -167,19 +167,156 @@ async function initSignedInLabel() {
  * may differ from fn.name — see the module doc comment above).
  */
 function reflect(fn) {
-  const src = fn
-    .toString()
-    // Bookkeeping statement injected right after every declaration,
-    // including ones nested inside another function's body:
-    // `__name(someFn, "someFn");`. Matched without line anchors so it is
-    // removed correctly even if minification ever puts it on a shared line
-    // with surrounding code — this project does not currently minify (no
-    // --minify flag in any deploy path), but the fix should not depend on
-    // that staying true.
-    .replace(/\s*__name\([^;]*\);/g, "");
+  const src = stripNameCalls(fn.toString());
 
   const m = /^(async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/.exec(src);
   return { name: fn.name, declaredAs: m ? m[2] : null, src };
+}
+
+/**
+ * Removes esbuild's `__name(fn, "fn")` bookkeeping wrapper (optionally
+ * preceded by a PURE-annotation comment), including cases wrapping a
+ * multi-statement arrow function passed inline — e.g. a
+ * `const x = __name((item) => { ...; ...; }, "x");` assignment, whose body
+ * contains semicolons of its own.
+ *
+ * Two shapes both occur in esbuild's output and need different treatment:
+ *   - a standalone statement, `__name(someFn, "someFn");` — removed entirely.
+ *   - an expression position, `const x = __name((item) => {...}, "x");` —
+ *     only the wrapper is removed, leaving `const x = (item) => {...};` so
+ *     the assignment survives.
+ *
+ * A single regex can't do this correctly: `__name(...)`'s argument list may
+ * itself contain semicolons, so a naive `[^;]*` stops at the first one
+ * inside the wrapped function body rather than at the call's actual closing
+ * paren. This walks the source character by character, tracking paren depth
+ * and skipping over string/template/regex literals and comments (so
+ * anything quoted or nested inside the first argument doesn't throw off the
+ * depth count or the split point), to find where the first argument ends
+ * and the call's true closing paren is.
+ */
+function stripNameCalls(src) {
+  const PURE_PREFIX = "/* @__PURE__ */ ";
+  let out = "";
+  let i = 0;
+
+  while (i < src.length) {
+    let start = i;
+    if (src.startsWith(PURE_PREFIX, i) && src.startsWith("__name(", i + PURE_PREFIX.length)) {
+      start = i + PURE_PREFIX.length;
+    }
+
+    if (src.startsWith("__name(", start)) {
+      const callStart = start + "__name(".length;
+      const call = scanNameCall(src, callStart);
+      if (call) {
+        let end = call.closeIdx + 1;
+        if (src[end] === ";") end += 1;
+
+        if (isStatementPosition(out)) {
+          // Standalone `__name(someFn, "someFn");` bookkeeping statement —
+          // drop it entirely, including the blank line it would otherwise
+          // leave behind.
+          while (out.length > 0 && /[ \t]/.test(out[out.length - 1])) out = out.slice(0, -1);
+          if (out.endsWith("\n")) {
+            let end2 = end;
+            while (end2 < src.length && (src[end2] === " " || src[end2] === "\t")) end2 += 1;
+            if (src[end2] === "\n") end = end2 + 1;
+          }
+        } else {
+          // Expression position, e.g. `const x = __name((item) => {...}, "x")`
+          // — keep the wrapped first argument, drop only the wrapper.
+          out += call.firstArg;
+        }
+
+        i = end;
+        continue;
+      }
+    }
+
+    out += src[i];
+    i += 1;
+  }
+
+  return out;
+}
+
+/**
+ * True when the text already emitted to `out` ends right where a new
+ * statement would begin — i.e. the upcoming `__name(...)` call is a
+ * standalone statement rather than sitting inside an expression (an
+ * assignment's right-hand side, a function argument, etc). Determined by the
+ * last non-whitespace character written so far: `;`, `{`, `}`, or nothing at
+ * all (start of source) all mean "a new statement starts here."
+ */
+function isStatementPosition(out) {
+  let j = out.length - 1;
+  while (j >= 0 && /\s/.test(out[j])) j -= 1;
+  if (j < 0) return true;
+  return out[j] === ";" || out[j] === "{" || out[j] === "}";
+}
+
+/**
+ * Scans a `__name(` call's argument list starting just after the opening
+ * paren. Returns the source text of the first argument (trimmed) and the
+ * index of the call's matching closing paren, or null if the source runs
+ * out before the call closes (defensive — should not happen on real output).
+ *
+ * The first argument's end is the last top-level comma before the matching
+ * close paren — "top-level" meaning not inside a nested paren/brace/bracket
+ * or a string/template/regex literal, since `__name`'s second argument is
+ * always a plain string literal with no parens or commas of its own.
+ */
+function scanNameCall(src, callStart) {
+  let depth = 1;
+  let i = callStart;
+  let lastTopLevelComma = -1;
+
+  while (i < src.length) {
+    const ch = src[i];
+
+    if (ch === '"' || ch === "'" || ch === "`") {
+      i = skipStringLiteral(src, i, ch);
+      continue;
+    }
+    if (ch === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && src[i + 1] === "*") {
+      i += 2;
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === "(" || ch === "{" || ch === "[") {
+      depth += 1;
+    } else if (ch === ")" || ch === "}" || ch === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        const end = lastTopLevelComma === -1 ? i : lastTopLevelComma;
+        return { firstArg: src.slice(callStart, end).trim(), closeIdx: i };
+      }
+    } else if (ch === "," && depth === 1) {
+      lastTopLevelComma = i;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/** Returns the index just past the closing quote of the literal starting at `i`. */
+function skipStringLiteral(src, i, quote) {
+  let j = i + 1;
+  while (j < src.length) {
+    if (src[j] === "\\") {
+      j += 2;
+      continue;
+    }
+    if (src[j] === quote) return j + 1;
+    j += 1;
+  }
+  return j;
 }
 
 /**
