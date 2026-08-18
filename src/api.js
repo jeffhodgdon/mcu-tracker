@@ -331,6 +331,126 @@ export async function handleDeleteWatchlistItem(request, env, user, itemId, sour
   return privateJson({ ok: true });
 }
 
+/* ------------------------------------------------------------------- admin */
+
+const ADMIN_ITEM_FIELDS = new Set([
+  "title",
+  "type",
+  "release_date",
+  "phase",
+  "runtime_min",
+  "is_estimate",
+  "chrono_order",
+  "chrono_setting",
+  "notes",
+]);
+
+export async function handleAdminAudit(request, env) {
+  const [missingRuntime, estimatedRuntime, missingReleaseDate, missingPhase, missingChrono] =
+    await Promise.all([
+      env.DB.prepare(
+        "SELECT id, title, type, runtime_min FROM items WHERE runtime_min IS NULL ORDER BY id"
+      ).all(),
+      env.DB.prepare(
+        "SELECT id, title, type, runtime_min FROM items WHERE is_estimate = 1 ORDER BY id"
+      ).all(),
+      env.DB.prepare(
+        "SELECT id, title, type, release_date FROM items WHERE release_date IS NULL ORDER BY id"
+      ).all(),
+      env.DB.prepare(
+        "SELECT id, title, type, phase FROM items WHERE phase IS NULL ORDER BY id"
+      ).all(),
+      // "Known unplaced" mirrors chronological.js: items with no announced
+      // in-universe setting are expected to lack chrono_order, so only flag
+      // items that DO have a setting but are still missing their order.
+      env.DB.prepare(
+        `SELECT id, title, type, chrono_order FROM items
+          WHERE chrono_order IS NULL AND chrono_setting IS NOT NULL
+          ORDER BY id`
+      ).all(),
+    ]);
+
+  return privateJson({
+    audit: {
+      missing_runtime: missingRuntime.results,
+      estimated_runtime: estimatedRuntime.results,
+      missing_release_date: missingReleaseDate.results,
+      missing_phase: missingPhase.results,
+      missing_chrono_order: missingChrono.results,
+    },
+  });
+}
+
+export async function handleAdminListItems(request, env) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate,
+            chrono_order, chrono_setting
+       FROM items
+      ORDER BY id`
+  ).all();
+
+  return privateJson({
+    items: results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 })),
+  });
+}
+
+export async function handleAdminPatchItem(request, env, itemId) {
+  if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
+
+  const body = await readJsonBody(request);
+  const fields = Object.keys(body).filter((k) => ADMIN_ITEM_FIELDS.has(k));
+  if (fields.length === 0) {
+    return error(`Provide at least one of: ${[...ADMIN_ITEM_FIELDS].join(", ")}`, 400);
+  }
+
+  const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?")
+    .bind(itemId)
+    .first();
+  if (!exists) return error("No such item", 404);
+
+  const values = [];
+  for (const field of fields) {
+    let value = body[field];
+    if (field === "is_estimate") {
+      value = value ? 1 : 0;
+    } else if (field === "runtime_min" || field === "chrono_order") {
+      if (value !== null && value !== undefined) {
+        value = Number(value);
+        if (!Number.isFinite(value)) return error(`${field} must be a number or null`, 400);
+      } else {
+        value = null;
+      }
+    } else if (field === "release_date") {
+      if (value !== null && value !== undefined) {
+        value = String(value).trim();
+        if (!isCalendarDate(value) && !/^\d{4}-\d{2}(-00)?$/.test(value)) {
+          return error("release_date must be a YYYY-MM-DD date or null", 400);
+        }
+      } else {
+        value = null;
+      }
+    } else {
+      value = value === null || value === undefined ? null : String(value);
+    }
+    values.push(value);
+  }
+
+  const setClause = fields.map((f) => `${f} = ?`).join(", ");
+  await env.DB.prepare(`UPDATE items SET ${setClause} WHERE id = ?`)
+    .bind(...values, itemId)
+    .run();
+
+  const row = await env.DB.prepare(
+    `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate,
+            chrono_order, chrono_setting
+       FROM items WHERE id = ?`
+  )
+    .bind(itemId)
+    .first();
+
+  return privateJson({ item: { ...row, is_estimate: row.is_estimate === 1 } });
+}
+
 /* ---------------------------------------------------------------- settings */
 
 export async function handleGetStats(request, env) {

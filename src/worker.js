@@ -11,6 +11,9 @@
 import { authenticate, readCookie } from "./auth.js";
 import {
   error,
+  handleAdminAudit,
+  handleAdminListItems,
+  handleAdminPatchItem,
   handleConsolidated,
   handleDeleteWatchlistItem,
   handleGetSettings,
@@ -32,7 +35,19 @@ import { releasePage } from "./ui/release.js";
 import { chronologicalPage } from "./ui/chronological.js";
 import { consolidatedPage } from "./ui/consolidated.js";
 import { otherPage } from "./ui/other.js";
+import { adminPage } from "./ui/admin.js";
 import { htmlResponse } from "./ui/shell.js";
+
+/**
+ * Hardcoded rather than DB-flagged: there is no admin-management UI, so a
+ * flag column would just be another place this exact list lives. Keyed by
+ * users.id (stable across email changes), not email.
+ */
+const ADMIN_USER_IDS = [8];
+
+function isAdmin(user) {
+  return !!user && ADMIN_USER_IDS.includes(user.user_id);
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -41,6 +56,13 @@ export default {
     try {
       if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
         return await handleApi(request, env, ctx, url);
+      }
+
+      if (url.pathname === "/admin") {
+        const user = await authenticate(request, env);
+        if (!user) return error("Authentication required", 401, { "cache-control": PRIVATE_CACHE_CONTROL });
+        if (!isAdmin(user)) return error("Forbidden", 403, { "cache-control": PRIVATE_CACHE_CONTROL });
+        return htmlResponse(adminPage());
       }
 
       const page = handlePage(url);
@@ -73,6 +95,8 @@ function handlePage(url) {
   if (path === "/chronological") return htmlResponse(chronologicalPage());
   if (path === "/consolidated") return htmlResponse(consolidatedPage());
   if (path === "/other") return htmlResponse(otherPage());
+  // /admin is handled separately in fetch() — it needs an auth check before
+  // rendering, unlike every other page here.
 
   return null;
 }
@@ -132,6 +156,28 @@ async function handleApi(request, env, ctx, url) {
     return jsonUser(user);
   }
 
+  if (pathname.startsWith("/api/admin/")) {
+    if (!user) return unauthorized();
+    if (!isAdmin(user)) return error("Forbidden", 403, { "cache-control": PRIVATE_CACHE_CONTROL });
+
+    if (pathname === "/api/admin/audit") {
+      return method === "GET" ? handleAdminAudit(request, env) : methodNotAllowed("GET");
+    }
+
+    if (pathname === "/api/admin/items") {
+      return method === "GET" ? handleAdminListItems(request, env) : methodNotAllowed("GET");
+    }
+
+    const itemMatch = /^\/api\/admin\/items\/(\d+)$/.exec(pathname);
+    if (itemMatch) {
+      return method === "PATCH"
+        ? handleAdminPatchItem(request, env, Number(itemMatch[1]))
+        : methodNotAllowed("PATCH");
+    }
+
+    return error("Not found", 404);
+  }
+
   if (pathname === "/api/watch-status") {
     if (method !== "GET") return methodNotAllowed("GET");
     if (!user) return unauthorized();
@@ -183,7 +229,7 @@ async function handleApi(request, env, ctx, url) {
 
 function jsonUser(user) {
   return new Response(
-    JSON.stringify({ user: { id: user.user_id, email: user.email } }),
+    JSON.stringify({ user: { id: user.user_id, email: user.email, is_admin: isAdmin(user) } }),
     {
       headers: {
         "content-type": "application/json; charset=utf-8",

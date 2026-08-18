@@ -55,6 +55,7 @@ export const NAV = [
   { href: "/chronological", id: "chronological", label: "Chronological" },
   { href: "/consolidated", id: "consolidated", label: "Consolidated" },
   { href: "/other", id: "other", label: "Other Universes" },
+  { href: "/admin", id: "admin", label: "Admin", adminOnly: true },
 ];
 
 /* ------------------------------------------------- client-side runtime ---- */
@@ -152,6 +153,10 @@ async function initSignedInLabel() {
         await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
         location.reload();
       });
+      if (me.data.user.is_admin) {
+        const adminLink = document.getElementById("nav-admin");
+        if (adminLink) adminLink.classList.remove("hide");
+      }
     } else {
       box.innerHTML = '<a class="btn-link" href="/api/auth/google">Sign in with Google</a>';
     }
@@ -374,7 +379,8 @@ const CLIENT_RUNTIME = normalizeNames(
 function navHtml(active) {
   return NAV.map((item) => {
     const current = item.id === active ? ' aria-current="page"' : "";
-    return '<a href="' + item.href + '"' + current + ">" + item.label + "</a>";
+    const cls = item.adminOnly ? ' class="hide" id="nav-admin"' : "";
+    return '<a href="' + item.href + '"' + current + cls + ">" + item.label + "</a>";
   }).join("\n      ");
 }
 

@@ -306,4 +306,31 @@ tbody tr.section:hover td { background: var(--bg); }
   thead th.opt, tbody td.opt { display: none; }
   tbody td, thead th { padding: 8px 6px; }
 }
+
+/* -------------------------------------------------------------------- admin */
+
+.tab-btn { font-size: 13px; font-weight: 700; padding: 6px 14px; }
+.tab-btn[aria-pressed="false"] { opacity: .5; }
+
+.admin-picker-results {
+  display: flex; flex-direction: column; gap: 2px;
+  margin-bottom: 14px; max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+}
+.admin-picker-item {
+  text-align: left; background: transparent; border: none;
+  padding: 7px 9px; border-radius: 6px; color: var(--text); font-size: 14px;
+}
+.admin-picker-item:hover { background: var(--card2); border-color: transparent; }
+
+.admin-field-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;
+}
+.admin-field-grid label {
+  display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted);
+}
+.admin-field-grid label.switch { flex-direction: row; align-items: center; }
+@media (max-width: 620px) {
+  .admin-field-grid { grid-template-columns: 1fr; }
+}
 `;
