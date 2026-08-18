@@ -22,12 +22,12 @@ const BODY = `
   <table>
     <thead>
       <tr>
-        <th style="width:44%">Title</th>
-        <th class="opt">Type</th>
-        <th class="opt">Phase</th>
-        <th>Released</th>
-        <th class="num">Runtime</th>
-        <th style="width:130px">Status</th>
+        <th style="width:44%;text-align:center">Title</th>
+        <th class="opt" style="text-align:center">Type</th>
+        <th class="opt" style="text-align:center">Phase</th>
+        <th style="text-align:center">Released</th>
+        <th class="num" style="text-align:center">Runtime</th>
+        <th style="width:130px;text-align:center">Status</th>
       </tr>
     </thead>
     <tbody id="rows">
@@ -228,7 +228,7 @@ function releaseMain() {
       '" class="tv-child hide' +
       (status === "watched" ? " watched" : "") +
       '">' +
-      '<td><span class="title">' +
+      '<td style="padding-left:48px"><span class="title">' +
       esc(item.title) +
       "</span></td>" +
       '<td class="opt"><span class="badge">' +

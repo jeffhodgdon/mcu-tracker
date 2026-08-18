@@ -67,7 +67,7 @@ const BODY = `
       <table>
         <thead>
           <tr>
-            <th style="width:44%">Title</th>
+            <th style="width:44%;text-align:center">Title</th>
             <th class="opt" style="text-align:center">Type</th>
             <th class="opt" style="text-align:center">Date</th>
             <th class="num" style="text-align:center">Runtime</th>

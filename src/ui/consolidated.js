@@ -22,11 +22,11 @@ const BODY = `
   <table>
     <thead>
       <tr>
-        <th style="width:44%">Franchise</th>
-        <th class="opt">Type</th>
-        <th>First release</th>
-        <th class="num">Entries</th>
-        <th class="num opt">Total runtime</th>
+        <th style="width:44%;text-align:center">Franchise</th>
+        <th class="opt" style="text-align:center">Type</th>
+        <th style="text-align:center">First release</th>
+        <th class="num" style="text-align:center">Entries</th>
+        <th class="num opt" style="text-align:center">Total runtime</th>
       </tr>
     </thead>
     <tbody id="rows">

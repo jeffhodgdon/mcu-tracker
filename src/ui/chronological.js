@@ -25,11 +25,11 @@ const BODY = `
   <table>
     <thead>
       <tr>
-        <th style="width:40%">Title</th>
-        <th class="opt">Type</th>
-        <th>In-universe setting</th>
-        <th class="num opt">Runtime</th>
-        <th style="width:130px">Status</th>
+        <th style="width:40%;text-align:center">Title</th>
+        <th class="opt" style="text-align:center">Type</th>
+        <th style="text-align:center">In-universe setting</th>
+        <th class="num opt" style="text-align:center">Runtime</th>
+        <th style="width:130px;text-align:center">Status</th>
       </tr>
     </thead>
     <tbody id="rows">
@@ -220,7 +220,7 @@ function chronologicalMain() {
       '" class="tv-child hide' +
       (status === "watched" ? " watched" : "") +
       '">' +
-      '<td><span class="title">' +
+      '<td style="padding-left:48px"><span class="title">' +
       esc(item.title) +
       "</span></td>" +
       '<td class="opt"><span class="badge">' +

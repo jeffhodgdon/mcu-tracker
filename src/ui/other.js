@@ -20,11 +20,11 @@ const BODY = `
   <table>
     <thead>
       <tr>
-        <th style="width:38%">Title</th>
-        <th class="opt">Setting</th>
-        <th>Released</th>
-        <th class="num opt">Runtime</th>
-        <th style="width:130px">Status</th>
+        <th style="width:38%;text-align:center">Title</th>
+        <th class="opt" style="text-align:center">Setting</th>
+        <th style="text-align:center">Released</th>
+        <th class="num opt" style="text-align:center">Runtime</th>
+        <th style="width:130px;text-align:center">Status</th>
       </tr>
     </thead>
     <tbody id="rows">
@@ -64,7 +64,7 @@ function otherMain() {
 
   function sectionRow(label, count) {
     return (
-      '<tr class="section"><td colspan="5">' + esc(label) + " (" + count + ")</td></tr>"
+      '<tr class="section"><td colspan="5" style="text-align:center">' + esc(label) + " (" + count + ")</td></tr>"
     );
   }
 

@@ -101,8 +101,10 @@ main {
   max-width: 960px;
   width: 100%;
   margin: 0 auto;
-  text-align: center;
 }
+
+.content-wrap h1 { text-align: center; }
+.content-wrap .sub { text-align: center; }
 
 h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .3px; }
@@ -193,6 +195,9 @@ button:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
 .upcoming button .d { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 table { width: 100%; border-collapse: collapse; }
+table th { text-align: center; }
+table td:first-child { text-align: left; }
+table td { text-align: center; }
 thead th {
   text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
   color: var(--muted); font-weight: 600;
