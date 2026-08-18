@@ -320,6 +320,8 @@ function releaseMain() {
 
     const released = state.items.filter((i) => isReleased(i, today)).sort(byReleaseDate);
     const upcoming = state.items.filter((i) => !isReleased(i, today)).sort(byReleaseDate);
+    state.released = released;
+    state.upcoming = upcoming;
 
     const groups = buildGroups(released);
     const html = [];
@@ -483,7 +485,7 @@ function releaseMain() {
       if ((state.statuses.get(item.id) || "unwatched") === "watched") watched++;
     }
     $("subtitle").textContent = state.signedIn
-      ? state.items.length + " titles · " + watched + " watched"
+      ? state.released.length + " titles · " + state.upcoming.length + " upcoming · " + watched + " watched"
       : state.items.length + " titles in release order";
   }
 

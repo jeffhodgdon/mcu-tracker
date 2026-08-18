@@ -166,6 +166,9 @@ function chronologicalMain() {
         return da < db ? -1 : 1;
       });
 
+    state.mainItems = main;
+    state.upcomingItems = upcoming;
+
     let html = main.map(rowHtml).join("");
     if (upcoming.length) {
       html +=
@@ -179,6 +182,20 @@ function chronologicalMain() {
     }
 
     applyTypeFilter();
+  }
+
+  function updateSubtitle() {
+    let watched = 0;
+    for (const item of state.items) {
+      if ((state.statuses.get(item.id) || "unwatched") === "watched") watched++;
+    }
+    $("subtitle").textContent =
+      state.mainItems.length +
+      " titles · " +
+      state.upcomingItems.length +
+      " upcoming · " +
+      watched +
+      " watched";
   }
 
   function applyTypeFilter() {
@@ -226,6 +243,7 @@ function chronologicalMain() {
       state.statuses.set(id, next);
       const row = select.closest("tr");
       if (row) row.classList.toggle("watched", next === "watched");
+      updateSubtitle();
     } catch (e) {
       select.value = previous;
       showError("Could not save that change: " + e.message);
@@ -263,17 +281,8 @@ function chronologicalMain() {
         }
       }
 
-      const today = todayEastern();
-      const mainCount = state.items.filter(
-        (i) => i.chrono_order !== null && i.chrono_order !== undefined && isReleased(i, today)
-      ).length;
-      const upcomingCount = state.items.length - mainCount;
-      $("subtitle").textContent =
-        mainCount +
-        " titles in in-universe order" +
-        (upcomingCount ? " · " + upcomingCount + " upcoming" : "");
-
       render();
+      updateSubtitle();
     } catch (e) {
       $("rows").innerHTML =
         '<tr><td colspan="5" class="muted" style="padding:18px">Could not load the catalogue.</td></tr>';
