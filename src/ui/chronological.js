@@ -3,10 +3,14 @@
  * (items.chrono_order, seeded from chronological-order.csv), with the same
  * per-item status control as Release Order.
  *
- * A handful of items (untitled future-film placeholders with no announced
- * setting) have no chronological placement yet — chrono_order is NULL for
- * them. Rather than hide them, they render in a trailing "Not yet placed"
- * section so the catalogue always accounts for every item.
+ * The main list only ever shows items that are both chronologically placed
+ * AND already released (on or before today, Eastern time) — a future release
+ * can't meaningfully occupy a spot in "what's happened so far" order even if
+ * its eventual chrono_order is already known. Everything else — future-dated
+ * items and items with no chronological placement at all (chrono_order NULL,
+ * mostly untitled future-film placeholders with no announced setting) — is
+ * combined into a trailing "Upcoming Releases" section, sorted by release
+ * date, so the catalogue always accounts for every item.
  */
 
 import { renderPage } from "./shell.js";
@@ -85,6 +89,19 @@ function chronologicalMain() {
     return '<tr class="section"><td colspan="5">' + esc(label) + "</td></tr>";
   }
 
+  // Today's date as "YYYY-MM-DD" in America/New_York, consistent with the
+  // rest of the app's Eastern-time date handling — mirrors consolidate.js's
+  // todayEastern(), reimplemented here since this file runs in the browser
+  // bundle rather than the Worker.
+  function todayEastern() {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  }
+
   function rowHtml(item) {
     const status = state.statuses.get(item.id) || "unwatched";
     const estimate = item.is_estimate
@@ -123,19 +140,37 @@ function chronologicalMain() {
     );
   }
 
-  function render() {
-    const placed = state.items
-      .filter((i) => i.chrono_order !== null && i.chrono_order !== undefined)
-      .sort((a, b) => a.chrono_order - b.chrono_order);
-    const unplaced = state.items
-      .filter((i) => i.chrono_order === null || i.chrono_order === undefined)
-      .sort((a, b) => a.id - b.id);
+  // An item belongs in the main list only if it both has a chronological
+  // placement AND has already released (on or before today, Eastern time) —
+  // everything else (future-dated, or not yet placed at all) is upcoming.
+  function isReleased(item, today) {
+    return isRealDate(item.release_date) && item.release_date <= today;
+  }
 
-    let html = placed.map(rowHtml).join("");
-    if (unplaced.length) {
+  function render() {
+    const today = todayEastern();
+
+    const main = state.items
+      .filter((i) => i.chrono_order !== null && i.chrono_order !== undefined && isReleased(i, today))
+      .sort((a, b) => a.chrono_order - b.chrono_order);
+
+    const upcoming = state.items
+      .filter((i) => !(i.chrono_order !== null && i.chrono_order !== undefined && isReleased(i, today)))
+      .sort((a, b) => {
+        const da = isRealDate(a.release_date) ? a.release_date : null;
+        const db = isRealDate(b.release_date) ? b.release_date : null;
+        if (!da && !db) return a.id - b.id;
+        if (!da) return 1;
+        if (!db) return -1;
+        if (da === db) return a.id - b.id;
+        return da < db ? -1 : 1;
+      });
+
+    let html = main.map(rowHtml).join("");
+    if (upcoming.length) {
       html +=
-        sectionRow("Not yet placed (" + unplaced.length + ")") +
-        unplaced.map(rowHtml).join("");
+        sectionRow("Upcoming Releases (" + upcoming.length + ")") +
+        upcoming.map(rowHtml).join("");
     }
     $("rows").innerHTML = html;
 
@@ -228,13 +263,15 @@ function chronologicalMain() {
         }
       }
 
-      const unplacedCount = state.items.filter(
-        (i) => i.chrono_order === null || i.chrono_order === undefined
+      const today = todayEastern();
+      const mainCount = state.items.filter(
+        (i) => i.chrono_order !== null && i.chrono_order !== undefined && isReleased(i, today)
       ).length;
+      const upcomingCount = state.items.length - mainCount;
       $("subtitle").textContent =
-        state.items.length +
+        mainCount +
         " titles in in-universe order" +
-        (unplacedCount ? " · " + unplacedCount + " not yet placed" : "");
+        (upcomingCount ? " · " + upcomingCount + " upcoming" : "");
 
       render();
     } catch (e) {

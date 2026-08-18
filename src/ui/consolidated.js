@@ -46,8 +46,8 @@ function consolidatedMain() {
 
   function groupRow(g, index) {
     const runtimeNote =
-      g.unknown_runtime_count > 0
-        ? '<div class="stat-note">' + g.unknown_runtime_count + " unreleased</div>"
+      g.unreleased_count > 0
+        ? '<div class="stat-note">' + g.unreleased_count + " unreleased</div>"
         : "";
     return (
       '<tr class="group-row" data-idx="' +

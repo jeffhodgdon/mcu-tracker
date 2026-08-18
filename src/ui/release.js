@@ -4,6 +4,12 @@
  *
  * Signed out the table still renders — /api/items is public — with the status
  * controls disabled rather than the page being blocked.
+ *
+ * Only already-released items (on or before today, Eastern time) get the
+ * TV-season grouping and appear in the main list. Everything not yet
+ * released — future-dated items and anything with no/partial release date —
+ * is combined into a trailing flat "Upcoming Releases" section, sorted by
+ * release date, so the catalogue always accounts for every item.
  */
 
 import { renderPage } from "./shell.js";
@@ -79,6 +85,10 @@ function releaseMain() {
           "</option>"
       )
       .join("");
+  }
+
+  function sectionRow(label) {
+    return '<tr class="section"><td colspan="6">' + esc(label) + "</td></tr>";
   }
 
   function rowHtml(item) {
@@ -277,19 +287,41 @@ function releaseMain() {
     );
   }
 
+  // Today's date as "YYYY-MM-DD" in America/New_York, consistent with the
+  // rest of the app's Eastern-time date handling — mirrors consolidate.js's
+  // todayEastern(), reimplemented here since this file runs in the browser
+  // bundle rather than the Worker.
+  function todayEastern() {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  }
+
+  function isReleased(item, today) {
+    return isRealDate(item.release_date) && item.release_date <= today;
+  }
+
   function render() {
+    const today = todayEastern();
+
     // Sorted on the raw string: catalogue dates are ISO-shaped, and partial
     // placeholders like 2027-07-00 land in the right slot this way. Undated
     // entries sort last rather than at the epoch.
-    const sorted = state.items.slice().sort(function (a, b) {
+    const byReleaseDate = function (a, b) {
       if (!a.release_date && !b.release_date) return a.id - b.id;
       if (!a.release_date) return 1;
       if (!b.release_date) return -1;
       if (a.release_date === b.release_date) return a.id - b.id;
       return a.release_date < b.release_date ? -1 : 1;
-    });
+    };
 
-    const groups = buildGroups(sorted);
+    const released = state.items.filter((i) => isReleased(i, today)).sort(byReleaseDate);
+    const upcoming = state.items.filter((i) => !isReleased(i, today)).sort(byReleaseDate);
+
+    const groups = buildGroups(released);
     const html = [];
     state.groups = new Map();
 
@@ -301,6 +333,11 @@ function releaseMain() {
       } else {
         html.push(rowHtml(group.items[0]));
       }
+    }
+
+    if (upcoming.length) {
+      html.push(sectionRow("Upcoming Releases (" + upcoming.length + ")"));
+      for (const item of upcoming) html.push(rowHtml(item));
     }
 
     $("rows").innerHTML = html.join("");

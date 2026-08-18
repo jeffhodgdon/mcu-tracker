@@ -48,6 +48,38 @@ function stripLeadingThe(s) {
   return s.replace(/^The\s+/i, "");
 }
 
+/**
+ * Today's date as "YYYY-MM-DD" in America/New_York, consistent with the rest
+ * of the app's Eastern-time date handling. Used to decide whether a member's
+ * release_date is still in the future — a plain UTC "today" can be off by a
+ * day right around midnight Eastern.
+ */
+function todayEastern() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/**
+ * A real, fully-specified ISO date ("YYYY-MM-DD", no "2027-07-00"-style
+ * placeholders). Mirrors ui/format.js's isRealDate, duplicated here rather
+ * than imported since this module runs both in the Worker (via
+ * handleConsolidated) and gets no bundling guarantee against browser-only
+ * helpers.
+ */
+function isRealDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !/-00(-|$)/.test(value);
+}
+
+/** True when a member counts as "not released yet": no real date, or a real date still in the future. */
+function isUnreleased(item, today) {
+  if (!isRealDate(item.release_date)) return true;
+  return item.release_date > today;
+}
+
 function preliminaryBase(title) {
   const season = /^(.*) \(Season \d+\)$/.exec(title);
   if (season) return season[1].trim();
@@ -164,6 +196,8 @@ export function consolidateItems(items) {
     groups.get(key).members.push(r.item);
   }
 
+  const today = todayEastern();
+
   const out = [];
   for (const { displayBase, members } of groups.values()) {
     // Earliest entry (by release date, undated last) sets the type/phase/base
@@ -178,11 +212,11 @@ export function consolidateItems(items) {
     const lead = sorted[0];
 
     let totalRuntime = 0;
-    let unknownRuntime = 0;
+    let unreleasedCount = 0;
     let anyEstimate = false;
     for (const m of members) {
       if (typeof m.runtime_min === "number") totalRuntime += m.runtime_min;
-      else unknownRuntime++;
+      if (isUnreleased(m, today)) unreleasedCount++;
       if (m.is_estimate) anyEstimate = true;
     }
 
@@ -193,7 +227,7 @@ export function consolidateItems(items) {
       entry_count: members.length,
       first_release_date: lead.release_date,
       total_runtime_min: totalRuntime,
-      unknown_runtime_count: unknownRuntime,
+      unreleased_count: unreleasedCount,
       any_estimate: anyEstimate,
       member_ids: sorted.map((m) => m.id),
     });
