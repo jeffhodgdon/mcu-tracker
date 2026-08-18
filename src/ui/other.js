@@ -1,8 +1,7 @@
 /**
- * Other Universes: browse-only reference table of non-MCU universes (Fox
- * X-Men, Sony Spider-Man, pre-MCU films, etc). No watch-status tracking, per
- * the brief — this data lives outside items and was never asked to be
- * trackable.
+ * Other Universes: reference table of non-MCU universes (Fox X-Men, Sony
+ * Spider-Man, pre-MCU films, etc). Watch-status tracking is available for
+ * signed-in users via /api/watch-status?source=other, mirroring release.js.
  */
 
 import { renderPage } from "./shell.js";
@@ -11,7 +10,11 @@ const BODY = `
 <h1>Other Universes</h1>
 <p class="sub" id="subtitle">Loading…</p>
 
-<div class="notice">Reference only — these are not part of the MCU catalogue and are not tracked.</div>
+<div id="signed-out" class="notice hide">
+  <strong>Sign in to track your progress.</strong>
+  <span class="muted">This reference table is public; watch status needs an account.</span>
+  <div style="margin-top:12px"><a class="btn-link" href="/api/auth/google">Sign in with Google</a></div>
+</div>
 
 <div class="card" style="padding:0;overflow:hidden">
   <table>
@@ -21,29 +24,58 @@ const BODY = `
         <th class="opt">Setting</th>
         <th>Released</th>
         <th class="num opt">Runtime</th>
+        <th style="width:130px">Status</th>
       </tr>
     </thead>
     <tbody id="rows">
-      <tr><td colspan="4" class="muted" style="padding:18px">Loading…</td></tr>
+      <tr><td colspan="5" class="muted" style="padding:18px">Loading…</td></tr>
     </tbody>
   </table>
 </div>
 `;
 
 function otherMain() {
+  const state = { statuses: new Map(), signedIn: false };
+
   function $(id) {
     return document.getElementById(id);
   }
 
+  function statusOptions(current) {
+    const opts = [
+      ["unwatched", "Unwatched"],
+      ["watched", "Watched"],
+      ["want_rewatch", "Rewatch"],
+      ["skip", "Skip"],
+    ];
+    return opts
+      .map(
+        (o) =>
+          '<option value="' +
+          o[0] +
+          '"' +
+          (o[0] === current ? " selected" : "") +
+          ">" +
+          o[1] +
+          "</option>"
+      )
+      .join("");
+  }
+
   function sectionRow(label, count) {
     return (
-      '<tr class="section"><td colspan="4">' + esc(label) + " (" + count + ")</td></tr>"
+      '<tr class="section"><td colspan="5">' + esc(label) + " (" + count + ")</td></tr>"
     );
   }
 
   function rowHtml(row) {
+    const status = state.statuses.get(row.id) || "unwatched";
     return (
-      "<tr><td><span class=\"title\">" +
+      '<tr data-id="' +
+      row.id +
+      '" class="' +
+      (status === "watched" ? "watched" : "") +
+      '"><td><span class="title">' +
       esc(row.title) +
       "</span></td>" +
       '<td class="opt muted">' +
@@ -54,7 +86,14 @@ function otherMain() {
       "</td>" +
       '<td class="num opt">' +
       (row.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(row.runtime_min)) +
-      "</td></tr>"
+      "</td>" +
+      '<td><select data-id="' +
+      row.id +
+      '"' +
+      (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
+      ">" +
+      statusOptions(status) +
+      "</select></td></tr>"
     );
   }
 
@@ -67,13 +106,43 @@ function otherMain() {
     return displayDate(value);
   }
 
+  async function onStatusChange(ev) {
+    const select = ev.target;
+    const id = Number(select.getAttribute("data-id"));
+    const next = select.value;
+    const previous = state.statuses.get(id) || "unwatched";
+
+    select.disabled = true;
+    try {
+      await apiPut("/api/watch-status/" + id + "?source=other", { status: next });
+      state.statuses.set(id, next);
+      const row = select.closest("tr");
+      if (row) row.classList.toggle("watched", next === "watched");
+    } catch (e) {
+      select.value = previous;
+      showError("Could not save that change: " + e.message);
+    } finally {
+      select.disabled = !state.signedIn ? true : false;
+    }
+  }
+
   async function main() {
     initNav();
-    initSignedInLabel();
+    const me = await initSignedInLabel();
+    state.signedIn = me.signedIn;
+
+    if (!state.signedIn) $("signed-out").classList.remove("hide");
 
     try {
       const res = await apiGet("/api/other-universes");
       const rows = res.data.other_universes;
+
+      if (state.signedIn) {
+        const watch = await apiGet("/api/watch-status");
+        for (const row of (watch.data && watch.data.watch_status) || []) {
+          if (row.source === "other") state.statuses.set(row.item_id, row.status);
+        }
+      }
 
       const byUniverse = new Map();
       for (const r of rows) {
@@ -89,9 +158,13 @@ function otherMain() {
         html += sectionRow(universe, list.length) + list.map(rowHtml).join("");
       }
       $("rows").innerHTML = html;
+
+      for (const sel of $("rows").querySelectorAll("select[data-id]")) {
+        sel.addEventListener("change", onStatusChange);
+      }
     } catch (e) {
       $("rows").innerHTML =
-        '<tr><td colspan="4" class="muted" style="padding:18px">Could not load this page.</td></tr>';
+        '<tr><td colspan="5" class="muted" style="padding:18px">Could not load this page.</td></tr>';
       showError(e.message);
     }
   }

@@ -68,10 +68,11 @@ const BODY = `
         <thead>
           <tr>
             <th style="width:44%">Title</th>
-            <th class="opt">Type</th>
-            <th class="num">Runtime</th>
-            <th style="width:130px">Status</th>
-            <th style="width:36px"></th>
+            <th class="opt" style="text-align:center">Type</th>
+            <th class="opt" style="text-align:center">Date</th>
+            <th class="num" style="text-align:center">Runtime</th>
+            <th style="width:130px;text-align:center">Status</th>
+            <th style="width:36px;text-align:center"></th>
           </tr>
         </thead>
         <tbody id="watchlist-rows"></tbody>
@@ -208,10 +209,10 @@ function dashboardMain() {
     return res.json();
   }
 
-  // Stats are scoped to the watch list, not the whole 117-item catalogue —
-  // "other" source entries are excluded because watch_status only tracks
-  // items(id) (see the "other" source's disabled status cell above, same
-  // underlying limitation).
+  // Stats are scoped to the MCU catalogue's runtime data, not the whole
+  // watch list — "other" source entries have no runtime_min to roll up, so
+  // they are excluded from these totals even though their watch status is
+  // tracked.
   function computeTotals() {
     let watched = 0;
     let remainingMinutes = 0;
@@ -224,7 +225,7 @@ function dashboardMain() {
       if (!item) continue;
 
       total++;
-      const status = state.statuses.get(entry.item_id) || "unwatched";
+      const status = state.statuses.get(wlKey(entry.source, entry.item_id)) || "unwatched";
       if (status === "watched") watched++;
       if (countsAsRemaining(status)) {
         if (typeof item.runtime_min === "number") remainingMinutes += item.runtime_min;
@@ -384,23 +385,34 @@ function dashboardMain() {
     if (!item) return "";
 
     const key = wlKey(entry.source, entry.item_id);
-    const status = entry.source === "mcu" ? state.statuses.get(entry.item_id) || "unwatched" : null;
-    const typeLabel = entry.source === "mcu" ? item.type : item.universe || "Other";
+    const status = state.statuses.get(key) || "unwatched";
+    const typeLabel =
+      entry.source === "mcu"
+        ? item.type
+        : /Season/.test(item.title || "")
+        ? "TV Series"
+        : "Film";
     const runtime =
       item.runtime_min === null || item.runtime_min === undefined
         ? '<span class="muted">—</span>'
         : formatRuntime(item.runtime_min);
 
     const statusCell =
-      entry.source === "mcu"
-        ? '<input type="checkbox" class="watchlist-watched-toggle" data-key="' +
-          esc(key) +
-          '" data-id="' +
-          item.id +
-          '"' +
-          (status === "watched" ? " checked" : "") +
-          ' aria-label="Mark watched">'
-        : '<span class="muted" title="Watch status is not tracked for Other Universes items">—</span>';
+      '<input type="checkbox" class="watchlist-watched-toggle" data-key="' +
+      esc(key) +
+      '" data-id="' +
+      item.id +
+      '" data-source="' +
+      esc(entry.source) +
+      '"' +
+      (status === "watched" ? " checked" : "") +
+      ' aria-label="Mark watched">';
+
+    const mode = watchlistSortMode();
+    const dateLabel =
+      mode === "chronological"
+        ? (entry.source === "mcu" ? item.chrono_setting : item.setting) || "—"
+        : (item.release_date || "").slice(0, 4) || "—";
 
     const classes = [];
     if (status === "watched") classes.push("watched");
@@ -420,6 +432,9 @@ function dashboardMain() {
       '<td class="opt"><span class="badge">' +
       esc(typeLabel) +
       "</span></td>" +
+      '<td class="opt">' +
+      esc(dateLabel) +
+      "</td>" +
       '<td class="num">' +
       runtime +
       "</td>" +
@@ -440,11 +455,58 @@ function dashboardMain() {
       count +
       ")</span></td>" +
       '<td class="opt"></td>' +
+      '<td class="opt"></td>' +
       '<td class="num"></td>' +
       "<td></td>" +
       "<td></td>" +
       "</tr>"
     );
+  }
+
+  function watchlistSortMode() {
+    return state.settings && state.settings.watchlist_sort === "chronological"
+      ? "chronological"
+      : "release";
+  }
+
+  // First year found in an other_universes "setting" string, e.g.
+  // "1943 / 1993" -> 1943, "1845 - 1979" -> 1845. Settings with no year
+  // ("contemporary") sort after everything with a known year.
+  function firstSettingYear(setting) {
+    const m = /\d{4}/.exec(setting || "");
+    return m ? Number(m[0]) : Infinity;
+  }
+
+  function sortWatchlistEntries(entries, mode) {
+    return entries.slice().sort((a, b) => {
+      const itemA = findItem(a.source, a.item_id);
+      const itemB = findItem(b.source, b.item_id);
+
+      if (mode === "chronological") {
+        const ka =
+          a.source === "mcu"
+            ? itemA && itemA.chrono_order != null
+              ? itemA.chrono_order
+              : Infinity
+            : firstSettingYear(itemA && itemA.setting);
+        const kb =
+          b.source === "mcu"
+            ? itemB && itemB.chrono_order != null
+              ? itemB.chrono_order
+              : Infinity
+            : firstSettingYear(itemB && itemB.setting);
+        if (ka === kb) return 0;
+        return ka < kb ? -1 : 1;
+      }
+
+      const da = normalizeDateKey((itemA && itemA.release_date) || "");
+      const db = normalizeDateKey((itemB && itemB.release_date) || "");
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      if (da === db) return 0;
+      return da < db ? -1 : 1;
+    });
   }
 
   function renderWatchlistTable() {
@@ -461,18 +523,20 @@ function dashboardMain() {
     for (const entry of state.watchlist) {
       const item = findItem(entry.source, entry.item_id);
       if (!item) continue;
-      const status = entry.source === "mcu" ? state.statuses.get(entry.item_id) || "unwatched" : "unwatched";
+      const status = state.statuses.get(wlKey(entry.source, entry.item_id)) || "unwatched";
       (status === "watched" ? watched : unwatched).push(entry);
     }
 
-    let html = unwatched.map((e) => watchlistRowHtml(e, false)).join("");
+    const sortedUnwatched = sortWatchlistEntries(unwatched, watchlistSortMode());
+
+    let html = sortedUnwatched.map((e) => watchlistRowHtml(e, false)).join("");
     if (watched.length) {
       html += watchedGroupParentHtml(watched.length);
       html += watched.map((e) => watchlistRowHtml(e, true)).join("");
     }
 
     $("watchlist-rows").innerHTML =
-      html || '<tr><td colspan="5" class="muted" style="padding:14px">Nothing here.</td></tr>';
+      html || '<tr><td colspan="6" class="muted" style="padding:14px">Nothing here.</td></tr>';
 
     for (const cb of $("watchlist-rows").querySelectorAll("input.watchlist-watched-toggle")) {
       cb.addEventListener("change", onWatchlistWatchedToggle);
@@ -498,13 +562,17 @@ function dashboardMain() {
   async function onWatchlistWatchedToggle(ev) {
     const checkbox = ev.target;
     const id = Number(checkbox.getAttribute("data-id"));
-    const previous = state.statuses.get(id) || "unwatched";
+    const source = checkbox.getAttribute("data-source") || "mcu";
+    const key = wlKey(source, id);
+    const previous = state.statuses.get(key) || "unwatched";
     const next = checkbox.checked ? "watched" : "unwatched";
 
     checkbox.disabled = true;
     try {
-      await apiPut("/api/watch-status/" + id, { status: next });
-      state.statuses.set(id, next);
+      await apiPut("/api/watch-status/" + id + "?source=" + encodeURIComponent(source), {
+        status: next,
+      });
+      state.statuses.set(key, next);
       renderStats();
       renderWatchlistTable();
     } catch (e) {
@@ -660,6 +728,18 @@ function dashboardMain() {
     );
   }
 
+  async function onWatchlistSortChange() {
+    const mode = $("watchlist-sort").value;
+    renderPicker();
+    try {
+      const res = await apiPut("/api/settings", { watchlist_sort: mode });
+      state.settings = res.settings;
+      renderWatchlistTable();
+    } catch (e) {
+      showError("Could not save sort preference: " + e.message);
+    }
+  }
+
   function renderPicker() {
     const mode = $("watchlist-sort").value;
     const includeOther = $("watchlist-include-other").checked;
@@ -739,7 +819,7 @@ function dashboardMain() {
   function openWatchlistModal() {
     state.pickerChecked = new Set(state.watchlist.map((e) => wlKey(e.source, e.item_id)));
     $("watchlist-modal-status").textContent = "";
-    $("watchlist-sort").value = "release";
+    $("watchlist-sort").value = watchlistSortMode();
     $("watchlist-include-other").checked = state.watchlist.some((e) => e.source === "other");
     renderPicker();
     $("watchlist-modal-overlay").classList.remove("hide");
@@ -761,10 +841,11 @@ function dashboardMain() {
     $("watchlist-clear-btn").disabled = true;
     try {
       for (const entry of state.watchlist) {
-        if (entry.source === "mcu") {
-          await apiPut("/api/watch-status/" + entry.item_id, { status: "unwatched" });
-          state.statuses.set(entry.item_id, "unwatched");
-        }
+        await apiPut(
+          "/api/watch-status/" + entry.item_id + "?source=" + encodeURIComponent(entry.source),
+          { status: "unwatched" }
+        );
+        state.statuses.set(wlKey(entry.source, entry.item_id), "unwatched");
         await apiDelete("/api/watchlist/" + entry.item_id + "?source=" + entry.source);
       }
       state.watchlist = [];
@@ -837,7 +918,7 @@ function dashboardMain() {
       state.settings = settings.data ? settings.data.settings : {};
       state.watchlist = (watchlist.data && watchlist.data.watchlist) || [];
       for (const row of (watch.data && watch.data.watch_status) || []) {
-        state.statuses.set(row.item_id, row.status);
+        state.statuses.set(wlKey(row.source || "mcu", row.item_id), row.status);
       }
 
       $("subtitle").textContent = state.items.length + " titles in the catalogue";
@@ -878,7 +959,7 @@ function dashboardMain() {
       $("watchlist-modal-overlay").addEventListener("click", function (ev) {
         if (ev.target === $("watchlist-modal-overlay")) closeWatchlistModal();
       });
-      $("watchlist-sort").addEventListener("change", renderPicker);
+      $("watchlist-sort").addEventListener("change", onWatchlistSortChange);
       $("watchlist-include-other").addEventListener("change", renderPicker);
       for (const btn of document.querySelectorAll("#watchlist-modal [data-quick]")) {
         btn.addEventListener("click", function () {

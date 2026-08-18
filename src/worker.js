@@ -137,7 +137,13 @@ async function handleApi(request, env, ctx, url) {
   if (watchMatch) {
     if (method !== "PUT") return methodNotAllowed("PUT");
     if (!user) return unauthorized();
-    return handlePutWatchStatus(request, env, user, Number(watchMatch[1]));
+    return handlePutWatchStatus(
+      request,
+      env,
+      user,
+      Number(watchMatch[1]),
+      url.searchParams.get("source") || "mcu"
+    );
   }
 
   if (pathname === "/api/watchlist") {
