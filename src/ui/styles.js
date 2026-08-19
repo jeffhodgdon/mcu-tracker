@@ -371,6 +371,28 @@ tbody tr.section:hover td { background: var(--bg); }
      column long enough to need to truncate rather than wrap. */
   .chrono-setting { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 
+  /* Release/Chronological/Other Universes/Consolidated tables: same
+     desktop/mobile row pairing as the dashboard watchlist (see
+     .wl-mobile-only below). The two-line mobile row layout is
+     self-explanatory, so the header is dropped entirely on mobile rather
+     than replaced with a condensed one. */
+  .cat-table thead { display: none; }
+
+  /* Phase (release.js flat/season rows) sits next to the type badge on
+     mobile line 2, grouped inside one wrapper so both share the badge's
+     grid-column:1 slot instead of each trying to claim it separately (see
+     .wl-mobile-line2-left below, defined outside this media query). */
+  .rt-mobile-phase { color: var(--muted); font-size: 12px; }
+
+  /* Small muted prefix distinguishing the mobile date column's meaning
+     (Release Date vs in-universe Timeline) now that there's no dedicated
+     column header to convey it. */
+  .rt-mobile-label { color: var(--muted); font-size: 10px; text-transform: uppercase; margin-right: 4px; }
+
+  /* Season child rows sit under a TV show's collapsible parent row, same as
+     desktop's padding-left:32px indent. */
+  .rt-mobile-indent { padding-left: 18px; }
+
   /* Touch-friendly tap targets: status selects, watch checkboxes and the
      standalone icon buttons (remove/edit — a full table cell to themselves,
      unlike .episode-toggle which sits inline before a title and stays
@@ -413,6 +435,22 @@ tbody tr.section:hover td { background: var(--bg); }
   grid-column: 1;
   justify-self: start;
 }
+
+/* Wraps the type badge together with a second piece of column-1 content
+   (currently just release.js's Phase label) so both sit in the same grid
+   cell, side by side, instead of each independently claiming grid-column:1
+   and stacking into their own row (auto-placement would otherwise put the
+   second item on a new row rather than beside the first). The nested .badge
+   is no longer a direct grid child once wrapped, so the rule above becomes a
+   harmless no-op for it — .wl-mobile-line2 pages that render a bare badge
+   (chronological.js, other.js, dashboard.js) are unaffected. */
+.wl-mobile-line2-left {
+  grid-column: 1;
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .wl-mobile-date {
   grid-column: 2;
   color: var(--muted); font-size: 12px; text-align: center;
@@ -441,7 +479,8 @@ tbody tr.section:hover td { background: var(--bg); }
   gap: 8px;
   font-weight: 500;
 }
-.wl-mobile-line1 .episode-toggle {
+.wl-mobile-line1 .episode-toggle,
+.wl-mobile-line1 .collapse-indicator {
   grid-column: 1;
   justify-self: start;
   text-align: center; padding: 2px 0; margin-right: 0;

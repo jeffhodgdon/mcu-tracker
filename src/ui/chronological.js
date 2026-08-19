@@ -42,7 +42,7 @@ const BODY = `
 </div>
 
 <div class="card" style="padding:0;overflow:hidden">
-  <table>
+  <table class="cat-table">
     <thead>
       <tr>
         <th style="width:40%;text-align:center">Title</th>
@@ -111,6 +111,9 @@ function chronologicalMain() {
     const estimate = item.is_estimate
       ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
       : "";
+    const runtime =
+      (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
+      estimate;
 
     const statusCell =
       '<select data-id="' +
@@ -121,13 +124,14 @@ function chronologicalMain() {
       statusOptions(status) +
       "</select>";
 
-    return (
-      '<tr data-id="' +
-      item.id +
-      '" data-type="' +
-      esc(item.type) +
-      '" class="' +
-      (status === "watched" ? "watched" : "") +
+    const rowAttrs = ' data-id="' + item.id + '" data-type="' + esc(item.type) + '"';
+    const watchedCls = status === "watched" ? " watched" : "";
+
+    const desktopRow =
+      "<tr" +
+      rowAttrs +
+      ' class="wl-desktop-only' +
+      watchedCls +
       '">' +
       '<td><span class="title">' +
       esc(item.title) +
@@ -141,14 +145,45 @@ function chronologicalMain() {
       esc(item.chrono_setting || "—") +
       "</span></td>" +
       '<td class="num opt">' +
-      (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
-      estimate +
+      runtime +
       "</td>" +
       "<td>" +
       statusCell +
       "</td>" +
-      "</tr>"
-    );
+      "</tr>";
+
+    const mobileRow =
+      "<tr" +
+      rowAttrs +
+      ' class="wl-mobile-only' +
+      watchedCls +
+      '">' +
+      '<td colspan="5">' +
+      '<div class="wl-mobile-line1">' +
+      '<span class="title">' +
+      esc(item.title) +
+      "</span>" +
+      '<span class="wl-mobile-runtime">' +
+      runtime +
+      "</span>" +
+      "</div>" +
+      '<div class="wl-mobile-line2">' +
+      '<span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
+      esc(item.type) +
+      "</span>" +
+      '<span class="wl-mobile-date chrono-setting"><span class="rt-mobile-label">TL</span>' +
+      esc(item.chrono_setting || "—") +
+      "</span>" +
+      '<span class="wl-mobile-line2-actions">' +
+      statusCell +
+      "</span>" +
+      "</div>" +
+      "</td>" +
+      "</tr>";
+
+    return desktopRow + mobileRow;
   }
 
   function seasonSelectHtml(itemId, status) {
@@ -223,27 +258,59 @@ function chronologicalMain() {
     const hasEstimate = group.items.some(function (it) {
       return it.is_estimate;
     });
+    const seasonCount = group.items.length;
+    const runtime =
+      (hasRuntime ? formatRuntime(totalRuntime) : '<span class="muted">—</span>') +
+      (hasEstimate ? ' <span class="badge est" title="Runtime is an estimate">est</span>' : "");
+    const watchedCls = allWatched ? " watched" : "";
+    const groupAttrs = ' data-group="' + esc(group.key) + '"';
 
-    return (
-      '<tr class="tv-parent' +
-      (allWatched ? " watched" : "") +
-      '" data-group="' +
-      esc(group.key) +
-      '" style="cursor:pointer">' +
+    const desktopRow =
+      '<tr class="tv-parent wl-desktop-only' +
+      watchedCls +
+      '"' +
+      groupAttrs +
+      ' style="cursor:pointer">' +
       '<td><span class="collapse-indicator">▶</span> <span class="title">' +
       esc(group.base) +
       "</span></td>" +
       '<td class="opt"><span class="badge" data-type="TV Series">TV Series</span></td>' +
       "<td>—</td>" +
       '<td class="num opt">' +
-      (hasRuntime ? formatRuntime(totalRuntime) : '<span class="muted">—</span>') +
-      (hasEstimate
-        ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
-        : "") +
+      runtime +
       "</td>" +
       "<td></td>" +
-      "</tr>"
-    );
+      "</tr>";
+
+    const mobileRow =
+      '<tr class="tv-parent wl-mobile-only' +
+      watchedCls +
+      '"' +
+      groupAttrs +
+      ' style="cursor:pointer">' +
+      '<td colspan="5">' +
+      '<div class="wl-mobile-line1">' +
+      '<span class="collapse-indicator">▶</span>' +
+      '<span class="title">' +
+      esc(group.base) +
+      "</span>" +
+      '<span class="wl-mobile-runtime">' +
+      runtime +
+      "</span>" +
+      "</div>" +
+      '<div class="wl-mobile-line2">' +
+      '<span class="badge" data-type="TV Series">TV Series</span>' +
+      '<span class="wl-mobile-date">' +
+      seasonCount +
+      " season" +
+      (seasonCount === 1 ? "" : "s") +
+      "</span>" +
+      '<span class="wl-mobile-line2-actions"></span>' +
+      "</div>" +
+      "</td>" +
+      "</tr>";
+
+    return desktopRow + mobileRow;
   }
 
   function seasonRowHtml(item, groupKey) {
@@ -253,16 +320,27 @@ function chronologicalMain() {
       : "";
     const seasonNum = seasonNumberOf(item.title);
     const seasonLabel = seasonNum !== null ? "Season " + seasonNum : item.title;
+    const runtime =
+      (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
+      estimate;
 
-    const row =
-      '<tr data-id="' +
+    const rowAttrs =
+      ' data-id="' +
       item.id +
       '" data-group="' +
       esc(groupKey) +
       '" data-type="' +
       esc(item.type) +
-      '" class="tv-child hide' +
-      (status === "watched" ? " watched" : "") +
+      '"';
+    const watchedCls = status === "watched" ? " watched" : "";
+    const progressSpan = '<span class="season-progress" data-season-progress="' + item.id + '"></span>';
+    const statusCell = seasonSelectHtml(item.id, status);
+
+    const desktopRow =
+      "<tr" +
+      rowAttrs +
+      ' class="tv-child hide wl-desktop-only' +
+      watchedCls +
       '">' +
       '<td style="padding-left:32px">' +
       episodeToggleHtml(item.id) +
@@ -278,18 +356,50 @@ function chronologicalMain() {
       esc(item.chrono_setting || "—") +
       "</span></td>" +
       '<td class="num opt">' +
-      (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
-      estimate +
+      runtime +
       "</td>" +
       "<td>" +
-      '<span class="season-progress" data-season-progress="' +
-      item.id +
-      '"></span> ' +
-      seasonSelectHtml(item.id, status) +
+      progressSpan +
+      " " +
+      statusCell +
       "</td>" +
       "</tr>";
 
-    return row + episodeRowsContainerHtml(item.id, 5);
+    const mobileRow =
+      "<tr" +
+      rowAttrs +
+      ' class="tv-child hide wl-mobile-only' +
+      watchedCls +
+      '">' +
+      '<td colspan="5" class="rt-mobile-indent">' +
+      '<div class="wl-mobile-line1">' +
+      episodeToggleHtml(item.id) +
+      '<span class="title">' +
+      esc(seasonLabel) +
+      "</span>" +
+      '<span class="wl-mobile-runtime">' +
+      runtime +
+      "</span>" +
+      "</div>" +
+      '<div class="wl-mobile-line2">' +
+      '<span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
+      esc(item.type) +
+      "</span>" +
+      '<span class="wl-mobile-date chrono-setting"><span class="rt-mobile-label">TL</span>' +
+      esc(item.chrono_setting || "—") +
+      " " +
+      progressSpan +
+      "</span>" +
+      '<span class="wl-mobile-line2-actions">' +
+      statusCell +
+      "</span>" +
+      "</div>" +
+      "</td>" +
+      "</tr>";
+
+    return desktopRow + mobileRow + episodeRowsContainerHtml(item.id, 5);
   }
 
   // An item belongs in the main list only if it both has a chronological
@@ -397,8 +507,7 @@ function chronologicalMain() {
     try {
       await apiPut("/api/watch-status/" + itemId, { status: next });
       state.statuses.set(itemId, next);
-      const row = select.closest("tr");
-      if (row) row.classList.toggle("watched", next === "watched");
+      syncItemRow(itemId, next);
       if (next === "watched" || next === "unwatched") {
         await episodeMarkAll(itemId, next === "watched");
         refreshSeasonProgress(itemId);
@@ -409,6 +518,20 @@ function chronologicalMain() {
       showError("Could not save that change: " + e.message);
     } finally {
       select.disabled = false;
+    }
+  }
+
+  // The desktop and mobile rows for an item are separate sibling <tr>s (see
+  // rowHtml/seasonRowHtml), each with its own status <select> — keeps both in
+  // sync with whichever one the user actually changed.
+  function syncItemRow(itemId, status) {
+    for (const row of $("rows").querySelectorAll('tr[data-id="' + itemId + '"]')) {
+      row.classList.toggle("watched", status === "watched");
+    }
+    for (const sel of $("rows").querySelectorAll(
+      'select[data-id="' + itemId + '"]:not(.season-mark-all)'
+    )) {
+      sel.value = status;
     }
   }
 
@@ -429,10 +552,10 @@ function chronologicalMain() {
   function applyTypeFilter() {
     let visible = 0;
     for (const item of state.items) {
-      const row = $("rows").querySelector('tr[data-id="' + item.id + '"]');
-      if (!row) continue;
+      const rows = $("rows").querySelectorAll('tr[data-id="' + item.id + '"]');
+      if (!rows.length) continue;
       const shown = state.activeTypes.has(item.type);
-      row.classList.toggle("filtered-out", !shown);
+      for (const row of rows) row.classList.toggle("filtered-out", !shown);
       if (shown) visible++;
 
       const episodeRow = $("rows").querySelector('tr.episode-rows[data-episode-rows="' + item.id + '"]');
@@ -478,8 +601,7 @@ function chronologicalMain() {
     try {
       await apiPut("/api/watch-status/" + id, { status: next });
       state.statuses.set(id, next);
-      const row = select.closest("tr");
-      if (row) row.classList.toggle("watched", next === "watched");
+      syncItemRow(id, next);
       updateSubtitle();
     } catch (e) {
       select.value = previous;

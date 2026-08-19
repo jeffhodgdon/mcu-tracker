@@ -17,7 +17,7 @@ const BODY = `
 </div>
 
 <div class="card" style="padding:0;overflow:hidden">
-  <table>
+  <table class="cat-table">
     <thead>
       <tr>
         <th style="width:38%;text-align:center">Title</th>
@@ -72,11 +72,24 @@ function otherMain() {
   function rowHtml(row) {
     const status = state.statuses.get(row.id) || "unwatched";
     const type = /Season/.test(row.title || "") ? "TV Series" : "Film";
-    return (
-      '<tr data-id="' +
+    const runtime =
+      row.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(row.runtime_min);
+    const statusCell =
+      '<select data-id="' +
       row.id +
-      '" class="' +
-      (status === "watched" ? "watched" : "") +
+      '"' +
+      (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
+      ">" +
+      statusOptions(status) +
+      "</select>";
+    const watchedCls = status === "watched" ? " watched" : "";
+    const rowAttrs = ' data-id="' + row.id + '"';
+
+    const desktopRow =
+      "<tr" +
+      rowAttrs +
+      ' class="wl-desktop-only' +
+      watchedCls +
       '"><td><span class="title">' +
       esc(row.title) +
       "</span></td>" +
@@ -92,16 +105,44 @@ function otherMain() {
       esc(displayYearOrDate(row.release_date)) +
       "</td>" +
       '<td class="num opt">' +
-      (row.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(row.runtime_min)) +
+      runtime +
       "</td>" +
-      '<td><select data-id="' +
-      row.id +
-      '"' +
-      (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
-      ">" +
-      statusOptions(status) +
-      "</select></td></tr>"
-    );
+      "<td>" +
+      statusCell +
+      "</td></tr>";
+
+    const mobileRow =
+      "<tr" +
+      rowAttrs +
+      ' class="wl-mobile-only' +
+      watchedCls +
+      '">' +
+      '<td colspan="6">' +
+      '<div class="wl-mobile-line1">' +
+      '<span class="title">' +
+      esc(row.title) +
+      "</span>" +
+      '<span class="wl-mobile-runtime">' +
+      runtime +
+      "</span>" +
+      "</div>" +
+      '<div class="wl-mobile-line2">' +
+      '<span class="badge" data-type="' +
+      esc(type) +
+      '">' +
+      esc(type) +
+      "</span>" +
+      '<span class="wl-mobile-date"><span class="rt-mobile-label">RD</span>' +
+      esc(displayYearOrDate(row.release_date)) +
+      "</span>" +
+      '<span class="wl-mobile-line2-actions">' +
+      statusCell +
+      "</span>" +
+      "</div>" +
+      "</td>" +
+      "</tr>";
+
+    return desktopRow + mobileRow;
   }
 
   // A few source rows carry only a bare year rather than a full date; showing
@@ -123,8 +164,12 @@ function otherMain() {
     try {
       await apiPut("/api/watch-status/" + id + "?source=other", { status: next });
       state.statuses.set(id, next);
-      const row = select.closest("tr");
-      if (row) row.classList.toggle("watched", next === "watched");
+      for (const row of $("rows").querySelectorAll('tr[data-id="' + id + '"]')) {
+        row.classList.toggle("watched", next === "watched");
+      }
+      for (const sel of $("rows").querySelectorAll('select[data-id="' + id + '"]')) {
+        sel.value = next;
+      }
     } catch (e) {
       select.value = previous;
       showError("Could not save that change: " + e.message);

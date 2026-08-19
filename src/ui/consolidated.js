@@ -11,7 +11,7 @@ const BODY = `
 <p class="sub" id="subtitle">Loading…</p>
 
 <div class="card" style="padding:0;overflow:hidden">
-  <table>
+  <table class="cat-table">
     <thead>
       <tr>
         <th style="width:44%;text-align:center">Franchise</th>
@@ -41,10 +41,12 @@ function consolidatedMain() {
       g.unreleased_count > 0
         ? '<div class="stat-note">' + g.unreleased_count + " unreleased</div>"
         : "";
-    return (
-      '<tr class="group-row" data-idx="' +
-      index +
-      '" style="cursor:pointer">' +
+    const rowAttrs = ' data-idx="' + index + '"';
+
+    const desktopRow =
+      "<tr" +
+      rowAttrs +
+      ' class="group-row wl-desktop-only" style="cursor:pointer">' +
       '<td><span class="title">' +
       esc(g.base_title) +
       "</span></td>" +
@@ -63,8 +65,38 @@ function consolidatedMain() {
       formatRuntime(g.total_runtime_min) +
       runtimeNote +
       "</td>" +
-      "</tr>"
-    );
+      "</tr>";
+
+    const mobileRow =
+      "<tr" +
+      rowAttrs +
+      ' class="group-row wl-mobile-only" style="cursor:pointer">' +
+      '<td colspan="5">' +
+      '<div class="wl-mobile-line1">' +
+      '<span class="title">' +
+      esc(g.base_title) +
+      "</span>" +
+      '<span class="wl-mobile-runtime">' +
+      formatRuntime(g.total_runtime_min) +
+      "</span>" +
+      "</div>" +
+      '<div class="wl-mobile-line2">' +
+      '<span class="badge" data-type="' +
+      esc(g.type || "") +
+      '">' +
+      esc(g.type || "—") +
+      "</span>" +
+      '<span class="wl-mobile-date">' +
+      esc(displayDate(g.first_release_date)) +
+      "</span>" +
+      '<span class="wl-mobile-line2-actions"><span class="badge count">' +
+      g.entry_count +
+      "</span></span>" +
+      "</div>" +
+      "</td>" +
+      "</tr>";
+
+    return desktopRow + mobileRow;
   }
 
   const TV_TYPES = ["TV Series", "Marvel Television", "Animated Series"];
@@ -76,17 +108,46 @@ function consolidatedMain() {
       .filter(Boolean)
       .map((item) => {
         const isTv = TV_TYPES.indexOf(item.type) !== -1;
-        const row =
-          '<tr class="detail-row hide" data-parent="' +
-          g._index +
-          '"><td style="padding-left:26px" colspan="2">' +
+        const runtime = item.runtime_min === null ? "—" : formatRuntime(item.runtime_min);
+        const parentAttr = ' data-parent="' + g._index + '"';
+
+        const desktopRow =
+          '<tr class="detail-row hide wl-desktop-only"' +
+          parentAttr +
+          '><td style="padding-left:26px" colspan="2">' +
           (isTv ? episodeToggleHtml(item.id) + " " : "") +
           esc(item.title) +
           "</td><td>" +
           esc(displayDate(item.release_date)) +
           '</td><td class="num"></td><td class="num opt">' +
-          (item.runtime_min === null ? "—" : formatRuntime(item.runtime_min)) +
+          runtime +
           "</td></tr>";
+
+        const mobileRow =
+          '<tr class="detail-row hide wl-mobile-only"' +
+          parentAttr +
+          '>' +
+          '<td colspan="5" class="rt-mobile-indent">' +
+          '<div class="wl-mobile-line1">' +
+          (isTv ? episodeToggleHtml(item.id) : "") +
+          '<span class="title">' +
+          esc(item.title) +
+          "</span>" +
+          '<span class="wl-mobile-runtime">' +
+          runtime +
+          "</span>" +
+          "</div>" +
+          '<div class="wl-mobile-line2">' +
+          '<span class="wl-mobile-line2-left"></span>' +
+          '<span class="wl-mobile-date">' +
+          esc(displayDate(item.release_date)) +
+          "</span>" +
+          '<span class="wl-mobile-line2-actions"></span>' +
+          "</div>" +
+          "</td>" +
+          "</tr>";
+
+        const row = desktopRow + mobileRow;
         if (!isTv) return row;
         // Tagged with detail-row/data-parent (in addition to its own
         // episode-rows class) so the franchise expand/collapse toggle, which
