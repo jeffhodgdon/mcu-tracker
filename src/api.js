@@ -158,11 +158,13 @@ export async function handleOtherUniverses(request, env) {
 
 /* ------------------------------------------------------------ watch status */
 
+// Season-level rows only, matching the pre-episode-tracking shape every
+// existing caller (release.js, chronological.js, dashboard.js) expects.
 export async function handleGetWatchStatus(request, env, user) {
   const { results } = await env.DB.prepare(
     `SELECT item_id, source, status, episode_progress, updated_at
        FROM watch_status
-      WHERE user_id = ?
+      WHERE user_id = ? AND episode_id = 0
       ORDER BY source, item_id`
   )
     .bind(user.user_id)
@@ -233,7 +235,7 @@ export async function handlePutWatchStatus(request, env, user, itemId, source) {
   // A partial update must not clobber the field it did not mention, so the
   // current row supplies the defaults for whatever the caller omitted.
   const existing = await env.DB.prepare(
-    "SELECT status, episode_progress FROM watch_status WHERE user_id = ? AND item_id = ? AND source = ?"
+    "SELECT status, episode_progress FROM watch_status WHERE user_id = ? AND item_id = ? AND source = ? AND episode_id = 0"
   )
     .bind(user.user_id, itemId, source)
     .first();
@@ -242,9 +244,9 @@ export async function handlePutWatchStatus(request, env, user, itemId, source) {
   const finalProgress = hasProgress ? progress : existing?.episode_progress ?? null;
 
   await env.DB.prepare(
-    `INSERT INTO watch_status (user_id, item_id, source, status, episode_progress, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(user_id, item_id, source) DO UPDATE SET
+    `INSERT INTO watch_status (user_id, item_id, source, episode_id, status, episode_progress, updated_at)
+     VALUES (?, ?, ?, 0, ?, ?, datetime('now'))
+     ON CONFLICT(user_id, item_id, source, episode_id) DO UPDATE SET
        status = excluded.status,
        episode_progress = excluded.episode_progress,
        updated_at = excluded.updated_at`
@@ -254,12 +256,110 @@ export async function handlePutWatchStatus(request, env, user, itemId, source) {
 
   const row = await env.DB.prepare(
     `SELECT item_id, source, status, episode_progress, updated_at
-       FROM watch_status WHERE user_id = ? AND item_id = ? AND source = ?`
+       FROM watch_status WHERE user_id = ? AND item_id = ? AND source = ? AND episode_id = 0`
   )
     .bind(user.user_id, itemId, source)
     .first();
 
   return privateJson({ watch_status: { ...row, episode_progress: parseProgress(row.episode_progress) } });
+}
+
+/* -------------------------------------------------------------- episodes */
+
+export async function handleGetItemEpisodes(request, env, itemId) {
+  if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
+
+  const { results } = await env.DB.prepare(
+    `SELECT id, episode_number, title, runtime_min, is_estimate
+       FROM episodes
+      WHERE item_id = ?
+      ORDER BY episode_number`
+  )
+    .bind(itemId)
+    .all();
+
+  return json({
+    episodes: results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 })),
+  });
+}
+
+/**
+ * Episode-aware watch status save. Same contract as PUT /api/watch-status/:id
+ * but accepts an optional episode_id — omitted or 0 means season-level,
+ * matching the sentinel the 0009 migration standardized on.
+ */
+export async function handlePostWatch(request, env, user) {
+  const body = await readJsonBody(request);
+
+  const itemId = Number(body.item_id);
+  if (!Number.isInteger(itemId) || itemId < 1) return error("item_id must be a positive integer", 400);
+
+  const source = String(body.source ?? "mcu");
+  if (!SOURCES.has(source)) {
+    return error(`source must be one of: ${[...SOURCES].join(", ")}`, 400);
+  }
+
+  const hasEpisodeId = Object.hasOwn(body, "episode_id") && body.episode_id !== null;
+  const episodeId = hasEpisodeId ? Number(body.episode_id) : 0;
+  if (!Number.isInteger(episodeId) || episodeId < 0) {
+    return error("episode_id must be a positive integer or null", 400);
+  }
+
+  const table = source === "other" ? "other_universes" : "items";
+  const exists = await env.DB.prepare(`SELECT 1 AS ok FROM ${table} WHERE id = ?`)
+    .bind(itemId)
+    .first();
+  if (!exists) return error("No such item", 404);
+
+  if (episodeId !== 0) {
+    const episodeExists = await env.DB.prepare(
+      "SELECT 1 AS ok FROM episodes WHERE id = ? AND item_id = ?"
+    )
+      .bind(episodeId, itemId)
+      .first();
+    if (!episodeExists) return error("No such episode for this item", 404);
+  }
+
+  if (!Object.hasOwn(body, "status")) return error("status is required", 400);
+  const status = String(body.status);
+  if (!WATCH_STATUSES.has(status)) {
+    return error(`status must be one of: ${[...WATCH_STATUSES].join(", ")}`, 400);
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO watch_status (user_id, item_id, source, episode_id, status, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(user_id, item_id, source, episode_id) DO UPDATE SET
+       status = excluded.status,
+       updated_at = excluded.updated_at`
+  )
+    .bind(user.user_id, itemId, source, episodeId, status)
+    .run();
+
+  const row = await env.DB.prepare(
+    `SELECT item_id, source, episode_id, status, updated_at
+       FROM watch_status WHERE user_id = ? AND item_id = ? AND source = ? AND episode_id = ?`
+  )
+    .bind(user.user_id, itemId, source, episodeId)
+    .first();
+
+  return privateJson({ watch_status: row });
+}
+
+/** All episode-level watch statuses for one item, for the signed-in user. */
+export async function handleGetWatchEpisodes(request, env, user, itemId) {
+  if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
+
+  const { results } = await env.DB.prepare(
+    `SELECT episode_id, status, updated_at
+       FROM watch_status
+      WHERE user_id = ? AND item_id = ? AND episode_id != 0
+      ORDER BY episode_id`
+  )
+    .bind(user.user_id, itemId)
+    .all();
+
+  return privateJson({ watch_status: results });
 }
 
 /* --------------------------------------------------------------- watchlist */
@@ -345,30 +445,70 @@ const ADMIN_ITEM_FIELDS = new Set([
   "notes",
 ]);
 
+// Same "generic placeholder" rule shell.js's looksGeneric() uses client-side
+// for episode rows — kept in sync by hand since one runs in the Worker and
+// the other is inlined into the browser bundle.
+function episodeTitleIsGeneric(title, episodeNumber) {
+  if (!title) return true;
+  const t = String(title).trim().toLowerCase();
+  return t === "" || t === "episode " + episodeNumber || /^episode\s+0*\d+$/.test(t);
+}
+
 export async function handleAdminAudit(request, env) {
-  const [missingRuntime, estimatedRuntime, missingReleaseDate, missingPhase, missingChrono] =
-    await Promise.all([
-      env.DB.prepare(
-        "SELECT id, title, type, runtime_min FROM items WHERE runtime_min IS NULL ORDER BY id"
-      ).all(),
-      env.DB.prepare(
-        "SELECT id, title, type, runtime_min FROM items WHERE is_estimate = 1 ORDER BY id"
-      ).all(),
-      env.DB.prepare(
-        "SELECT id, title, type, release_date FROM items WHERE release_date IS NULL ORDER BY id"
-      ).all(),
-      env.DB.prepare(
-        "SELECT id, title, type, phase FROM items WHERE phase IS NULL ORDER BY id"
-      ).all(),
-      // "Known unplaced" mirrors chronological.js: items with no announced
-      // in-universe setting are expected to lack chrono_order, so only flag
-      // items that DO have a setting but are still missing their order.
-      env.DB.prepare(
-        `SELECT id, title, type, chrono_order FROM items
-          WHERE chrono_order IS NULL AND chrono_setting IS NOT NULL
-          ORDER BY id`
-      ).all(),
-    ]);
+  const [
+    missingRuntime,
+    estimatedRuntime,
+    missingReleaseDate,
+    missingPhase,
+    missingChrono,
+    episodeRows,
+  ] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id, title, type, runtime_min FROM items WHERE runtime_min IS NULL ORDER BY id"
+    ).all(),
+    env.DB.prepare(
+      "SELECT id, title, type, runtime_min FROM items WHERE is_estimate = 1 ORDER BY id"
+    ).all(),
+    env.DB.prepare(
+      "SELECT id, title, type, release_date FROM items WHERE release_date IS NULL ORDER BY id"
+    ).all(),
+    env.DB.prepare(
+      "SELECT id, title, type, phase FROM items WHERE phase IS NULL ORDER BY id"
+    ).all(),
+    // "Known unplaced" mirrors chronological.js: items with no announced
+    // in-universe setting are expected to lack chrono_order, so only flag
+    // items that DO have a setting but are still missing their order.
+    env.DB.prepare(
+      `SELECT id, title, type, chrono_order FROM items
+        WHERE chrono_order IS NULL AND chrono_setting IS NOT NULL
+        ORDER BY id`
+    ).all(),
+    env.DB.prepare(
+      `SELECT e.id, e.item_id, e.episode_number, e.title, i.title AS item_title, i.type AS item_type
+         FROM episodes e
+         JOIN items i ON i.id = e.item_id
+        ORDER BY e.item_id, e.episode_number`
+    ).all(),
+  ]);
+
+  const byItem = new Map();
+  for (const row of episodeRows.results) {
+    if (!episodeTitleIsGeneric(row.title, row.episode_number)) continue;
+    if (!byItem.has(row.item_id)) {
+      byItem.set(row.item_id, {
+        item_id: row.item_id,
+        item_title: row.item_title,
+        item_type: row.item_type,
+        episodes: [],
+      });
+    }
+    byItem.get(row.item_id).episodes.push({
+      id: row.id,
+      episode_number: row.episode_number,
+      title: row.title,
+    });
+  }
+  const missingEpisodeNames = [...byItem.values()].sort((a, b) => a.item_id - b.item_id);
 
   return privateJson({
     audit: {
@@ -377,7 +517,68 @@ export async function handleAdminAudit(request, env) {
       missing_release_date: missingReleaseDate.results,
       missing_phase: missingPhase.results,
       missing_chrono_order: missingChrono.results,
+      missing_episode_names: missingEpisodeNames,
     },
+  });
+}
+
+/* --------------------------------------------------------- admin episodes */
+
+function validateEpisodeInput(raw) {
+  const episodeNumber = Number(raw.episode_number);
+  if (!Number.isInteger(episodeNumber) || episodeNumber < 1) {
+    throw new HttpError("episode_number must be a positive integer", 400);
+  }
+  const title = raw.title === null || raw.title === undefined ? null : String(raw.title).trim() || null;
+
+  let runtimeMin = null;
+  if (raw.runtime_min !== null && raw.runtime_min !== undefined && raw.runtime_min !== "") {
+    runtimeMin = Number(raw.runtime_min);
+    if (!Number.isFinite(runtimeMin)) throw new HttpError("runtime_min must be a number or null", 400);
+  }
+
+  const isEstimate = raw.is_estimate ? 1 : 0;
+
+  return { episode_number: episodeNumber, title, runtime_min: runtimeMin, is_estimate: isEstimate };
+}
+
+/** Replaces every episode of one item with the given list — delete then bulk insert. */
+export async function handleAdminReplaceEpisodes(request, env, itemId) {
+  if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
+
+  const body = await readJsonBody(request);
+  if (!Array.isArray(body.episodes)) return error("episodes must be an array", 400);
+
+  const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?").bind(itemId).first();
+  if (!exists) return error("No such item", 404);
+
+  let parsed;
+  try {
+    parsed = body.episodes.map(validateEpisodeInput);
+  } catch (err) {
+    if (err instanceof HttpError) return error(err.message, err.status);
+    throw err;
+  }
+
+  const statements = [
+    env.DB.prepare("DELETE FROM episodes WHERE item_id = ?").bind(itemId),
+    ...parsed.map((ep) =>
+      env.DB.prepare(
+        "INSERT INTO episodes (item_id, episode_number, title, runtime_min, is_estimate) VALUES (?, ?, ?, ?, ?)"
+      ).bind(itemId, ep.episode_number, ep.title, ep.runtime_min, ep.is_estimate)
+    ),
+  ];
+  await env.DB.batch(statements);
+
+  const { results } = await env.DB.prepare(
+    `SELECT id, episode_number, title, runtime_min, is_estimate
+       FROM episodes WHERE item_id = ? ORDER BY episode_number`
+  )
+    .bind(itemId)
+    .all();
+
+  return privateJson({
+    episodes: results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 })),
   });
 }
 

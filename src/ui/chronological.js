@@ -102,15 +102,28 @@ function chronologicalMain() {
     }).format(new Date());
   }
 
+  const TV_TYPES = ["TV Series", "Marvel Television", "Animated Series"];
+
   function rowHtml(item) {
     const status = state.statuses.get(item.id) || "unwatched";
     const estimate = item.is_estimate
       ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
       : "";
 
+    const statusCell =
+      '<select data-id="' +
+      item.id +
+      '"' +
+      (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
+      ">" +
+      statusOptions(status) +
+      "</select>";
+
     return (
       '<tr data-id="' +
       item.id +
+      '" data-type="' +
+      esc(item.type) +
       '" class="' +
       (status === "watched" ? "watched" : "") +
       '">' +
@@ -129,15 +142,152 @@ function chronologicalMain() {
       (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
       estimate +
       "</td>" +
-      '<td><select data-id="' +
-      item.id +
-      '"' +
+      "<td>" +
+      statusCell +
+      "</td>" +
+      "</tr>"
+    );
+  }
+
+  function seasonSelectHtml(itemId, status) {
+    return (
+      '<select data-id="' +
+      itemId +
+      '" class="season-mark-all"' +
       (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
       ">" +
       statusOptions(status) +
-      "</select></td>" +
+      "</select>"
+    );
+  }
+
+  // Strips season-style suffixes so seasons of the same show share one group
+  // key, mirroring release.js's tvBaseTitle.
+  function tvBaseTitle(title) {
+    return title
+      .replace(/\s*\(Season\s+\d+\)\s*$/i, "")
+      .replace(/\s+Season\s+\d+$/i, "")
+      .replace(/\s+S\d+$/i, "")
+      .trim();
+  }
+
+  function seasonNumberOf(title) {
+    const m =
+      /\(Season\s+(\d+)\)\s*$/i.exec(title) ||
+      /\bSeason\s+(\d+)$/i.exec(title) ||
+      /\bS(\d+)$/i.exec(title);
+    return m ? Number(m[1]) : null;
+  }
+
+  // Groups the (already chrono-sorted) main list by show, placed at the
+  // position of its earliest-chrono-order season — later seasons of the same
+  // show fold into that same group instead of getting their own slot,
+  // mirroring release.js's buildGroups but keyed off chrono order rather than
+  // release date.
+  function buildChronoGroups(sorted) {
+    const order = [];
+    const byBase = new Map();
+
+    for (const item of sorted) {
+      const isTv = TV_TYPES.indexOf(item.type) !== -1;
+      if (!isTv) {
+        order.push({ key: "single-" + item.id, isTv: false, items: [item] });
+        continue;
+      }
+
+      const base = tvBaseTitle(item.title);
+      let group = byBase.get(base);
+      if (!group) {
+        group = { key: "tv-" + base, isTv: true, base: base, items: [] };
+        byBase.set(base, group);
+        order.push(group);
+      }
+      group.items.push(item);
+    }
+
+    return order;
+  }
+
+  function parentRowHtml(group) {
+    const allWatched = group.items.every(function (it) {
+      return (state.statuses.get(it.id) || "unwatched") === "watched";
+    });
+    const hasRuntime = group.items.some(function (it) {
+      return it.runtime_min !== null;
+    });
+    const totalRuntime = group.items.reduce(function (sum, it) {
+      return sum + (it.runtime_min || 0);
+    }, 0);
+    const hasEstimate = group.items.some(function (it) {
+      return it.is_estimate;
+    });
+
+    return (
+      '<tr class="tv-parent' +
+      (allWatched ? " watched" : "") +
+      '" data-group="' +
+      esc(group.key) +
+      '" style="cursor:pointer">' +
+      '<td><span class="collapse-indicator">▶</span> <span class="title">' +
+      esc(group.base) +
+      "</span></td>" +
+      '<td class="opt"><span class="badge" data-type="TV Series">TV Series</span></td>' +
+      "<td>—</td>" +
+      '<td class="num opt">' +
+      (hasRuntime ? formatRuntime(totalRuntime) : '<span class="muted">—</span>') +
+      (hasEstimate
+        ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
+        : "") +
+      "</td>" +
+      "<td></td>" +
       "</tr>"
     );
+  }
+
+  function seasonRowHtml(item, groupKey) {
+    const status = state.statuses.get(item.id) || "unwatched";
+    const estimate = item.is_estimate
+      ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
+      : "";
+    const seasonNum = seasonNumberOf(item.title);
+    const seasonLabel = seasonNum !== null ? "Season " + seasonNum : item.title;
+
+    const row =
+      '<tr data-id="' +
+      item.id +
+      '" data-group="' +
+      esc(groupKey) +
+      '" data-type="' +
+      esc(item.type) +
+      '" class="tv-child hide' +
+      (status === "watched" ? " watched" : "") +
+      '">' +
+      '<td style="padding-left:32px">' +
+      episodeToggleHtml(item.id) +
+      ' <span class="title">' +
+      esc(seasonLabel) +
+      "</span></td>" +
+      '<td class="opt"><span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
+      esc(item.type) +
+      "</span></td>" +
+      "<td>" +
+      esc(item.chrono_setting || "—") +
+      "</td>" +
+      '<td class="num opt">' +
+      (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
+      estimate +
+      "</td>" +
+      "<td>" +
+      '<span class="season-progress" data-season-progress="' +
+      item.id +
+      '"></span> ' +
+      seasonSelectHtml(item.id, status) +
+      "</td>" +
+      "</tr>";
+
+    return row + episodeRowsContainerHtml(item.id, 5);
   }
 
   // An item belongs in the main list only if it both has a chronological
@@ -169,19 +319,95 @@ function chronologicalMain() {
     state.mainItems = main;
     state.upcomingItems = upcoming;
 
-    let html = main.map(rowHtml).join("");
-    if (upcoming.length) {
-      html +=
-        sectionRow("Upcoming Releases (" + upcoming.length + ")") +
-        upcoming.map(rowHtml).join("");
-    }
-    $("rows").innerHTML = html;
+    const groups = buildChronoGroups(main);
+    const html = [];
+    state.groups = new Map();
 
-    for (const sel of $("rows").querySelectorAll("select[data-id]")) {
+    for (const group of groups) {
+      if (group.isTv) {
+        state.groups.set(group.key, group);
+        html.push(parentRowHtml(group));
+        for (const item of group.items) html.push(seasonRowHtml(item, group.key));
+      } else {
+        html.push(rowHtml(group.items[0]));
+      }
+    }
+
+    if (upcoming.length) {
+      html.push(sectionRow("Upcoming Releases (" + upcoming.length + ")"));
+      for (const item of upcoming) html.push(rowHtml(item));
+    }
+    $("rows").innerHTML = html.join("");
+
+    for (const sel of $("rows").querySelectorAll("select[data-id]:not(.season-mark-all)")) {
       sel.addEventListener("change", onStatusChange);
     }
+    for (const sel of $("rows").querySelectorAll("select.season-mark-all")) {
+      sel.addEventListener("change", onSeasonMarkAllChange);
+    }
+    for (const tr of $("rows").querySelectorAll("tr.tv-parent")) {
+      tr.addEventListener("click", onParentToggle);
+    }
+    wireEpisodeToggles($("rows"), refreshSeasonProgress);
 
     applyTypeFilter();
+  }
+
+  function onParentToggle(ev) {
+    if (ev.target.closest("select")) return;
+    const tr = ev.currentTarget;
+    const key = tr.getAttribute("data-group");
+    const expanded = tr.classList.toggle("expanded");
+    const indicator = tr.querySelector(".collapse-indicator");
+    if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+
+    for (const child of $("rows").querySelectorAll("tr.tv-child")) {
+      if (child.getAttribute("data-group") === key) {
+        child.classList.toggle("hide", !expanded);
+        if (!expanded) {
+          const itemId = child.getAttribute("data-id");
+          const episodeRow = $("rows").querySelector('tr.episode-rows[data-episode-rows="' + itemId + '"]');
+          if (episodeRow) episodeRow.classList.add("hide");
+          const toggleBtn = child.querySelector("[data-episode-toggle]");
+          if (toggleBtn) {
+            toggleBtn.setAttribute("aria-expanded", "false");
+            toggleBtn.textContent = "▶";
+          }
+        }
+      }
+    }
+  }
+
+  function refreshSeasonProgress(itemId) {
+    const label = episodeProgressLabel(itemId);
+    for (const el of $("rows").querySelectorAll('[data-season-progress="' + itemId + '"]')) {
+      el.textContent = label || "";
+    }
+  }
+
+  async function onSeasonMarkAllChange(ev) {
+    const select = ev.target;
+    const itemId = Number(select.getAttribute("data-id"));
+    const next = select.value;
+    const previous = state.statuses.get(itemId) || "unwatched";
+
+    select.disabled = true;
+    try {
+      await apiPut("/api/watch-status/" + itemId, { status: next });
+      state.statuses.set(itemId, next);
+      const row = select.closest("tr");
+      if (row) row.classList.toggle("watched", next === "watched");
+      if (next === "watched" || next === "unwatched") {
+        await episodeMarkAll(itemId, next === "watched");
+        refreshSeasonProgress(itemId);
+      }
+      updateSubtitle();
+    } catch (e) {
+      select.value = previous;
+      showError("Could not save that change: " + e.message);
+    } finally {
+      select.disabled = false;
+    }
   }
 
   function updateSubtitle() {
@@ -206,6 +432,15 @@ function chronologicalMain() {
       const shown = state.activeTypes.has(item.type);
       row.classList.toggle("filtered-out", !shown);
       if (shown) visible++;
+
+      const episodeRow = $("rows").querySelector('tr.episode-rows[data-episode-rows="' + item.id + '"]');
+      if (episodeRow) episodeRow.classList.toggle("filtered-out", !shown);
+    }
+    for (const parent of $("rows").querySelectorAll("tr.tv-parent")) {
+      const key = parent.getAttribute("data-group");
+      const children = $("rows").querySelectorAll('tr.tv-child[data-group="' + key + '"]');
+      const anyVisible = [...children].some((c) => !c.classList.contains("filtered-out"));
+      parent.classList.toggle("filtered-out", !anyVisible);
     }
     $("filter-bar-count").textContent =
       "Showing " + visible + " of " + state.items.length + " titles";

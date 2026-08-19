@@ -53,13 +53,13 @@ const BODY = `
         <label>Phase
           <input type="text" id="f-phase">
         </label>
-        <label>Runtime (min)
+        <label id="f-runtime-label">Runtime (min)
           <input type="text" id="f-runtime" placeholder="e.g. 143">
         </label>
         <label>Chrono order
           <input type="text" id="f-chrono-order" placeholder="e.g. 12">
         </label>
-        <label class="switch" style="margin-top:22px">
+        <label class="switch" id="f-is-estimate-label" style="margin-top:22px">
           <input type="checkbox" id="f-is-estimate">
           Runtime is an estimate
         </label>
@@ -69,6 +69,29 @@ const BODY = `
         <span id="edit-feedback"></span>
       </div>
     </form>
+  </div>
+
+  <div class="card hide" id="episodes-card" style="margin-top:16px">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Episodes</h2>
+      <button type="button" id="episode-add-btn">Add Episode</button>
+    </div>
+    <table style="margin-top:12px">
+      <thead>
+        <tr>
+          <th style="width:70px;text-align:center">#</th>
+          <th style="text-align:center">Title</th>
+          <th style="width:110px;text-align:center">Runtime (min)</th>
+          <th style="width:70px;text-align:center">Est.</th>
+          <th style="width:60px;text-align:center"></th>
+        </tr>
+      </thead>
+      <tbody id="episode-rows"></tbody>
+    </table>
+    <div class="row" style="margin-top:14px">
+      <button type="button" id="episode-save-btn" class="btn-primary">Save Episodes</button>
+      <span id="episode-feedback"></span>
+    </div>
   </div>
 </div>
 
@@ -96,7 +119,16 @@ const BODY = `
 `;
 
 function adminMain() {
-  const state = { items: [], allSort: { key: "title", dir: 1 }, editingId: null };
+  // Declared inside adminMain (not at module scope) because renderPage()
+  // reflects only this function's own source via Function.prototype.toString()
+  // into the browser bundle — a sibling module-level const would be a
+  // dangling free variable at runtime, exactly like RUNTIME_FNS/stripNameCalls
+  // exists to prevent for cross-function calls. Mirrors the local TV_TYPES
+  // constant release.js and chronological.js each declare inside their own
+  // *Main() function for the same reason.
+  const ADMIN_TV_TYPES = ["TV Series", "Marvel Television", "Animated Series"];
+
+  const state = { items: [], allSort: { key: "title", dir: 1 }, editingId: null, episodes: [] };
 
   function $(id) {
     return document.getElementById(id);
@@ -113,7 +145,9 @@ function adminMain() {
 
   function auditRowHtml(item, valueLabel) {
     return (
-      "<tr><td><span class=\"title\">" +
+      '<tr class="admin-clickable-row" data-id="' +
+      item.id +
+      '"><td><span class="title">' +
       esc(item.title) +
       "</span></td><td class=\"opt\"><span class=\"badge\" data-type=\"" +
       esc(item.type) +
@@ -128,7 +162,7 @@ function adminMain() {
   function auditSectionHtml(label, items, valueOf) {
     const rows = items.map((i) => auditRowHtml(i, valueOf(i))).join("");
     return (
-      '<div class="card" style="margin-bottom:16px">' +
+      '<div class="card admin-audit-section" style="margin-bottom:16px">' +
       "<h2>" +
       esc(label) +
       " (" +
@@ -137,6 +171,56 @@ function adminMain() {
       (items.length
         ? '<table><thead><tr><th style="text-align:center">Title</th><th class="opt" style="text-align:center">Type</th><th style="text-align:center">Value</th></tr></thead><tbody>' +
           rows +
+          "</tbody></table>"
+        : '<p class="muted" style="text-align:center;margin:0">No issues.</p>') +
+      "</div>"
+    );
+  }
+
+  function missingEpisodeNamesSectionHtml(groups) {
+    const count = groups.reduce(function (sum, g) {
+      return sum + g.episodes.length;
+    }, 0);
+
+    const body = groups
+      .map(function (g) {
+        const epRows = g.episodes
+          .map(function (ep) {
+            return (
+              '<tr class="admin-clickable-row" data-id="' +
+              g.item_id +
+              '"><td style="padding-left:26px">E' +
+              String(ep.episode_number).padStart(2, "0") +
+              "</td><td>" +
+              (ep.title ? esc(ep.title) : '<span class="muted">(empty)</span>') +
+              "</td></tr>"
+            );
+          })
+          .join("");
+
+        return (
+          '<tr class="admin-clickable-row admin-audit-subheader" data-id="' +
+          g.item_id +
+          '"><td colspan="2"><span class="title">' +
+          esc(g.item_title) +
+          "</span> <span class=\"badge\" data-type=\"" +
+          esc(g.item_type) +
+          "\">" +
+          esc(g.item_type) +
+          "</span></td></tr>" +
+          epRows
+        );
+      })
+      .join("");
+
+    return (
+      '<div class="card admin-audit-section" style="margin-bottom:16px">' +
+      "<h2>Missing episode names (" +
+      count +
+      ")</h2>" +
+      (groups.length
+        ? '<table><thead><tr><th style="text-align:center">Episode</th><th style="text-align:center">Title</th></tr></thead><tbody>' +
+          body +
           "</tbody></table>"
         : '<p class="muted" style="text-align:center;margin:0">No issues.</p>') +
       "</div>"
@@ -162,7 +246,15 @@ function adminMain() {
         }) +
         auditSectionHtml("Missing chrono order", a.missing_chrono_order, function () {
           return "—";
+        }) +
+        missingEpisodeNamesSectionHtml(a.missing_episode_names || []);
+
+      for (const row of $("audit-sections").querySelectorAll(".admin-clickable-row")) {
+        row.addEventListener("click", function () {
+          const item = state.items.find((i) => i.id === Number(row.getAttribute("data-id")));
+          if (item) openEditor(item);
         });
+      }
     } catch (e) {
       $("audit-sections").innerHTML = '<p class="muted" style="text-align:center">Could not load audit.</p>';
       showError(e.message);
@@ -182,11 +274,221 @@ function adminMain() {
     $("edit-feedback").textContent = "";
     $("edit-feedback").className = "";
     $("edit-form").classList.remove("hide");
+
+    const isTv = ADMIN_TV_TYPES.indexOf(item.type) !== -1;
+    $("episodes-card").classList.toggle("hide", !isTv);
+    $("f-runtime").readOnly = isTv;
+    // Only the label's own leading text node is replaced here — using
+    // textContent on the <label> itself would also delete the <input> it
+    // contains, since the input is a child of the label.
+    $("f-runtime-label").firstChild.textContent = isTv
+      ? "Runtime (min) — auto-calculated from episodes"
+      : "Runtime (min)";
+    // For TV items f-is-estimate becomes a tri-state master switch over the
+    // episode Est. checkboxes (see syncSeasonEstimateCheckbox/onSeasonEstimateChange)
+    // rather than a plain read-only mirror, so it stays enabled/clickable here.
+    $("f-is-estimate").disabled = false;
+
+    if (isTv) loadEpisodesForEditor(item.id);
+    else $("f-is-estimate").indeterminate = false;
+  }
+
+  /**
+   * Recomputes f-is-estimate's tri-state (checked/indeterminate/unchecked)
+   * from the current episode Est. checkboxes — mirrors syncFranchiseParentCheckbox
+   * in dashboard.js for the franchise picker's parent/child checkboxes.
+   */
+  function syncSeasonEstimateCheckbox() {
+    const boxes = [...$("episode-rows").querySelectorAll(".ep-estimate")];
+    if (!boxes.length) {
+      $("f-is-estimate").checked = false;
+      $("f-is-estimate").indeterminate = false;
+      return;
+    }
+    const checkedCount = boxes.filter((cb) => cb.checked).length;
+    $("f-is-estimate").checked = checkedCount === boxes.length;
+    $("f-is-estimate").indeterminate = checkedCount > 0 && checkedCount < boxes.length;
+  }
+
+  function onSeasonEstimateChange(ev) {
+    const checkAll = ev.target.checked;
+    for (const cb of $("episode-rows").querySelectorAll(".ep-estimate")) {
+      cb.checked = checkAll;
+    }
+    updateComputedRuntime();
   }
 
   function openEditor(item) {
     setTab("edit");
     populateForm(item);
+  }
+
+  function episodeEditRowHtml(ep, index) {
+    return (
+      '<tr data-index="' +
+      index +
+      '"><td>' +
+      (ep.episode_number === null || ep.episode_number === undefined ? "—" : ep.episode_number) +
+      "</td>" +
+      '<td><input type="text" class="ep-title" value="' +
+      esc(ep.title || "") +
+      '" style="width:100%"></td>' +
+      '<td><input type="number" class="ep-runtime" value="' +
+      (ep.runtime_min === null || ep.runtime_min === undefined ? "" : ep.runtime_min) +
+      '" style="width:100%"></td>' +
+      '<td><input type="checkbox" class="ep-estimate"' +
+      (ep.is_estimate ? " checked" : "") +
+      "></td>" +
+      '<td><button type="button" class="episode-remove-btn" data-index="' +
+      index +
+      '" aria-label="Remove episode" title="Remove episode" style="background:none;border:none;cursor:pointer;font-size:14px">✕</button></td></tr>'
+    );
+  }
+
+  function renderEpisodeEditRows() {
+    $("episode-rows").innerHTML = state.episodes.length
+      ? state.episodes.map(episodeEditRowHtml).join("")
+      : '<tr><td colspan="5" class="muted" style="padding:14px;text-align:center">No episodes yet.</td></tr>';
+
+    for (const btn of $("episode-rows").querySelectorAll(".episode-remove-btn")) {
+      btn.addEventListener("click", function () {
+        const idx = Number(btn.getAttribute("data-index"));
+        state.episodes.splice(idx, 1);
+        renderEpisodeEditRows();
+        updateComputedRuntime();
+      });
+    }
+    for (const input of $("episode-rows").querySelectorAll(".ep-runtime, .ep-estimate")) {
+      input.addEventListener("input", updateComputedRuntime);
+      input.addEventListener("change", updateComputedRuntime);
+    }
+
+    updateComputedRuntime();
+  }
+
+  /**
+   * Recomputes runtime_min from the episode rows currently in the DOM (not
+   * state.episodes, since the user may be mid-edit) and reflects it into the
+   * read-only runtime field, then refreshes f-is-estimate's tri-state from
+   * the same rows — only meaningful while the Episodes card is visible, i.e.
+   * the selected item is a TV type.
+   */
+  function updateComputedRuntime() {
+    if ($("episodes-card").classList.contains("hide")) return;
+
+    let total = 0;
+    for (const row of $("episode-rows").querySelectorAll("tr[data-index]")) {
+      const runtimeInput = row.querySelector(".ep-runtime");
+      const value = runtimeInput.value.trim();
+      if (value !== "") total += Number(value) || 0;
+    }
+
+    $("f-runtime").value = total;
+    syncSeasonEstimateCheckbox();
+  }
+
+  async function loadEpisodesForEditor(itemId) {
+    $("episode-rows").innerHTML =
+      '<tr><td colspan="5" class="muted" style="padding:14px;text-align:center">Loading…</td></tr>';
+    $("episode-feedback").textContent = "";
+    try {
+      const res = await apiGet("/api/items/" + itemId + "/episodes");
+      state.episodes = (res.data && res.data.episodes) || [];
+      renderEpisodeEditRows();
+    } catch (e) {
+      $("episode-rows").innerHTML =
+        '<tr><td colspan="5" class="muted" style="padding:14px;text-align:center">Could not load episodes.</td></tr>';
+    }
+  }
+
+  function readEpisodeEditRows() {
+    const rows = [...$("episode-rows").querySelectorAll("tr[data-index]")];
+    return rows.map(function (row) {
+      const idx = Number(row.getAttribute("data-index"));
+      const titleInput = row.querySelector(".ep-title");
+      const runtimeInput = row.querySelector(".ep-runtime");
+      const estimateInput = row.querySelector(".ep-estimate");
+      return {
+        episode_number: state.episodes[idx].episode_number,
+        title: titleInput.value.trim() || null,
+        runtime_min: runtimeInput.value.trim() === "" ? null : Number(runtimeInput.value.trim()),
+        is_estimate: estimateInput.checked,
+      };
+    });
+  }
+
+  function onEpisodeAdd() {
+    const nextNumber = state.episodes.length
+      ? Math.max.apply(
+          null,
+          state.episodes.map(function (ep) {
+            return ep.episode_number || 0;
+          })
+        ) + 1
+      : 1;
+    state.episodes.push({ episode_number: nextNumber, title: "", runtime_min: null, is_estimate: false });
+    renderEpisodeEditRows();
+  }
+
+  async function onEpisodeSave() {
+    if (!state.editingId) return;
+    const episodes = readEpisodeEditRows();
+
+    for (const ep of episodes) {
+      if (!Number.isInteger(ep.episode_number) || ep.episode_number < 1) {
+        $("episode-feedback").textContent = "Every episode needs a valid episode number.";
+        $("episode-feedback").style.color = "#ffb4b4";
+        return;
+      }
+    }
+
+    const feedback = $("episode-feedback");
+    $("episode-save-btn").disabled = true;
+    feedback.textContent = "Saving…";
+    feedback.style.color = "";
+    try {
+      const res = await apiPutJson("/api/admin/episodes/" + state.editingId, { episodes: episodes });
+      state.episodes = res.episodes;
+      renderEpisodeEditRows();
+
+      // Episodes are now the source of truth for the item's runtime/estimate
+      // — updateComputedRuntime() (called by renderEpisodeEditRows) already
+      // refreshed f-runtime/f-is-estimate from the saved rows, so saving the
+      // item now persists exactly those computed values.
+      const itemRes = await apiPut2("/api/admin/items/" + state.editingId, {
+        runtime_min: $("f-runtime").value.trim() === "" ? null : Number($("f-runtime").value.trim()),
+        is_estimate: $("f-is-estimate").checked,
+      });
+      const updated = itemRes.item;
+      const idx = state.items.findIndex((i) => i.id === updated.id);
+      if (idx !== -1) state.items[idx] = updated;
+      renderAllRows();
+
+      feedback.textContent = "Episodes and item runtime saved.";
+      feedback.style.color = "var(--done)";
+    } catch (e) {
+      feedback.textContent = "Error: " + e.message;
+      feedback.style.color = "#ffb4b4";
+    } finally {
+      $("episode-save-btn").disabled = false;
+    }
+  }
+
+  async function apiPutJson(path, body) {
+    const res = await fetch(path, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = res.status;
+      try {
+        detail = (await res.json()).error || detail;
+      } catch (e) {}
+      throw new Error(String(detail));
+    }
+    return res.json();
   }
 
   function onPickerInput(ev) {
@@ -225,6 +527,9 @@ function adminMain() {
     ev.preventDefault();
     if (!state.editingId) return;
 
+    // For TV items f-runtime/f-is-estimate are read-only and kept in sync
+    // with the episode rows by updateComputedRuntime(), so reading them here
+    // (rather than recomputing) is exactly "send the computed values".
     const body = {
       title: $("f-title").value.trim(),
       type: $("f-type").value,
@@ -279,7 +584,9 @@ function adminMain() {
 
   function allRowHtml(item) {
     return (
-      "<tr><td><span class=\"title\">" +
+      '<tr class="admin-clickable-row" data-id="' +
+      item.id +
+      '"><td><span class="title">' +
       esc(item.title) +
       "</span></td><td class=\"opt\"><span class=\"badge\" data-type=\"" +
       esc(item.type) +
@@ -314,9 +621,9 @@ function adminMain() {
     });
 
     $("all-rows").innerHTML = sorted.map(allRowHtml).join("");
-    for (const btn of $("all-rows").querySelectorAll("[data-id]")) {
-      btn.addEventListener("click", function () {
-        const item = state.items.find((i) => i.id === Number(btn.getAttribute("data-id")));
+    for (const row of $("all-rows").querySelectorAll("tr.admin-clickable-row")) {
+      row.addEventListener("click", function () {
+        const item = state.items.find((i) => i.id === Number(row.getAttribute("data-id")));
         if (item) openEditor(item);
       });
     }
@@ -362,6 +669,11 @@ function adminMain() {
     });
     $("sort-release").addEventListener("click", function () {
       onSortClick("release_date");
+    });
+    $("episode-add-btn").addEventListener("click", onEpisodeAdd);
+    $("episode-save-btn").addEventListener("click", onEpisodeSave);
+    $("f-is-estimate").addEventListener("change", function (ev) {
+      if (!$("episodes-card").classList.contains("hide")) onSeasonEstimateChange(ev);
     });
 
     await loadItems();

@@ -14,15 +14,19 @@ import {
   handleAdminAudit,
   handleAdminListItems,
   handleAdminPatchItem,
+  handleAdminReplaceEpisodes,
   handleConsolidated,
   handleDeleteWatchlistItem,
+  handleGetItemEpisodes,
   handleGetSettings,
   handleGetStats,
+  handleGetWatchEpisodes,
   handleGetWatchlist,
   handleGetWatchStatus,
   handleListItems,
   handleLogout,
   handleOtherUniverses,
+  handlePostWatch,
   handlePostWatchlist,
   handlePutSettings,
   handlePutWatchStatus,
@@ -138,6 +142,13 @@ async function handleApi(request, env, ctx, url) {
     return method === "GET" ? handleConsolidated(request, env) : methodNotAllowed("GET");
   }
 
+  const episodesMatch = /^\/api\/items\/(\d+)\/episodes$/.exec(pathname);
+  if (episodesMatch) {
+    return method === "GET"
+      ? handleGetItemEpisodes(request, env, Number(episodesMatch[1]))
+      : methodNotAllowed("GET");
+  }
+
   if (pathname === "/api/other-universes") {
     return method === "GET" ? handleOtherUniverses(request, env) : methodNotAllowed("GET");
   }
@@ -175,6 +186,13 @@ async function handleApi(request, env, ctx, url) {
         : methodNotAllowed("PATCH");
     }
 
+    const episodesMatch = /^\/api\/admin\/episodes\/(\d+)$/.exec(pathname);
+    if (episodesMatch) {
+      return method === "PUT"
+        ? handleAdminReplaceEpisodes(request, env, Number(episodesMatch[1]))
+        : methodNotAllowed("PUT");
+    }
+
     return error("Not found", 404);
   }
 
@@ -182,6 +200,19 @@ async function handleApi(request, env, ctx, url) {
     if (method !== "GET") return methodNotAllowed("GET");
     if (!user) return unauthorized();
     return handleGetWatchStatus(request, env, user);
+  }
+
+  if (pathname === "/api/watch") {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!user) return unauthorized();
+    return handlePostWatch(request, env, user);
+  }
+
+  if (pathname === "/api/watch/episodes") {
+    if (method !== "GET") return methodNotAllowed("GET");
+    if (!user) return unauthorized();
+    const itemId = Number(url.searchParams.get("item_id"));
+    return handleGetWatchEpisodes(request, env, user, itemId);
   }
 
   const watchMatch = /^\/api\/watch-status\/(.+)$/.exec(pathname);

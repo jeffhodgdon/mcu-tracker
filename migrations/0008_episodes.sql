@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS episodes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES items(id),
+  episode_number INTEGER NOT NULL,
+  title TEXT,
+  runtime_min INTEGER,
+  is_estimate INTEGER NOT NULL DEFAULT 0
+);

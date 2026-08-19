@@ -418,7 +418,9 @@ function dashboardMain() {
     if (status === "watched") classes.push("watched");
     if (child) classes.push("tv-child", "hide");
 
-    return (
+    const isTv = entry.source === "mcu" && TV_TYPES.indexOf(item.type) !== -1;
+
+    const row =
       '<tr data-key="' +
       esc(key) +
       '" data-group="' +
@@ -426,7 +428,9 @@ function dashboardMain() {
       '" class="' +
       classes.join(" ") +
       '">' +
-      '<td style="text-align:left"><span class="title">' +
+      '<td style="text-align:left">' +
+      (isTv ? episodeToggleHtml(item.id) + " " : "") +
+      '<span class="title">' +
       esc(item.title) +
       "</span></td>" +
       '<td class="opt"><span class="badge" data-type="' +
@@ -446,8 +450,19 @@ function dashboardMain() {
       '<td><button type="button" class="watchlist-remove" data-key="' +
       esc(key) +
       '" aria-label="Remove from watch list" title="Remove from watch list" style="background:none;border:none;cursor:pointer;font-size:14px">✕</button></td>' +
-      "</tr>"
+      "</tr>";
+
+    if (!isTv) return row;
+
+    const episodeRow = episodeRowsContainerHtml(item.id, 6).replace(
+      'class="episode-rows hide"',
+      'class="episode-rows' +
+        (child ? " tv-child" : "") +
+        ' hide" data-group="' +
+        (child ? "watched" : "") +
+        '"'
     );
+    return row + episodeRow;
   }
 
   function watchedGroupParentHtml(count) {
@@ -548,6 +563,8 @@ function dashboardMain() {
     }
     const parent = $("watchlist-rows").querySelector('tr.tv-parent[data-group="watched-parent"]');
     if (parent) parent.addEventListener("click", onWatchedGroupToggle);
+
+    wireEpisodeToggles($("watchlist-rows"));
   }
 
   function onWatchedGroupToggle(ev) {
@@ -557,6 +574,20 @@ function dashboardMain() {
     const indicator = tr.querySelector(".collapse-indicator");
     if (indicator) indicator.textContent = expanded ? "▼" : "▶";
     for (const child of $("watchlist-rows").querySelectorAll('tr.tv-child[data-group="watched"]')) {
+      if (child.classList.contains("episode-rows")) {
+        // Its own episode-toggle button controls reveal; collapsing the
+        // Watched group should only ever re-hide it, not show it unasked.
+        if (!expanded) {
+          child.classList.add("hide");
+          const itemId = child.getAttribute("data-episode-rows");
+          const toggleBtn = $("watchlist-rows").querySelector('[data-episode-toggle="' + itemId + '"]');
+          if (toggleBtn) {
+            toggleBtn.setAttribute("aria-expanded", "false");
+            toggleBtn.textContent = "▶";
+          }
+        }
+        continue;
+      }
       child.classList.toggle("hide", !expanded);
     }
   }

@@ -67,23 +67,37 @@ function consolidatedMain() {
     );
   }
 
+  const TV_TYPES = ["TV Series", "Marvel Television", "Animated Series"];
+
   function memberRows(g) {
     if (g.entry_count <= 1) return "";
     const rows = g.member_ids
       .map((id) => itemsById.get(id))
       .filter(Boolean)
-      .map(
-        (item) =>
+      .map((item) => {
+        const isTv = TV_TYPES.indexOf(item.type) !== -1;
+        const row =
           '<tr class="detail-row hide" data-parent="' +
           g._index +
           '"><td style="padding-left:26px" colspan="2">' +
+          (isTv ? episodeToggleHtml(item.id) + " " : "") +
           esc(item.title) +
           "</td><td>" +
           esc(displayDate(item.release_date)) +
           '</td><td class="num"></td><td class="num opt">' +
           (item.runtime_min === null ? "—" : formatRuntime(item.runtime_min)) +
-          "</td></tr>"
-      )
+          "</td></tr>";
+        if (!isTv) return row;
+        // Tagged with detail-row/data-parent (in addition to its own
+        // episode-rows class) so the franchise expand/collapse toggle, which
+        // only knows about .detail-row, hides it too when the franchise
+        // collapses — independent of its own toggle button's state.
+        const episodeRow = episodeRowsContainerHtml(item.id, 5).replace(
+          'class="episode-rows hide"',
+          'class="episode-rows detail-row hide" data-parent="' + g._index + '"'
+        );
+        return row + episodeRow;
+      })
       .join("");
     return rows;
   }
@@ -102,10 +116,24 @@ function consolidatedMain() {
         for (const detail of $("rows").querySelectorAll(
           'tr.detail-row[data-parent="' + idx + '"]'
         )) {
+          if (detail.classList.contains("episode-rows")) {
+            // Its own episode-toggle button controls reveal; collapsing the
+            // franchise should only ever re-hide it, never show it on its own.
+            detail.classList.add("hide");
+            const itemId = detail.getAttribute("data-episode-rows");
+            const toggleBtn = $("rows").querySelector('[data-episode-toggle="' + itemId + '"]');
+            if (toggleBtn) {
+              toggleBtn.setAttribute("aria-expanded", "false");
+              toggleBtn.textContent = "▶";
+            }
+            continue;
+          }
           detail.classList.toggle("hide");
         }
       });
     }
+
+    wireEpisodeToggles($("rows"));
   }
 
   async function main() {

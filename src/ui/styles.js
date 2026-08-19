@@ -185,6 +185,17 @@ button, select, input[type="date"], input[type="text"], input[type="search"] {
 button { cursor: pointer; }
 button:hover { border-color: #36405c; }
 button:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
+/* Scoped to text-like inputs only — browsers match checkbox/radio inputs
+   against :read-only too (they have no text-editing concept of readonly),
+   which would otherwise put a not-allowed cursor on interactive checkboxes
+   like the episode Est. boxes that are never actually disabled/readonly. */
+input[type="text"]:disabled, input[type="number"]:disabled, input[type="search"]:disabled,
+input[type="date"]:disabled,
+input[type="text"]:read-only, input[type="number"]:read-only, input[type="search"]:read-only,
+input[type="date"]:read-only {
+  opacity: .65;
+  cursor: not-allowed;
+}
 
 .btn-primary {
   background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
@@ -195,6 +206,7 @@ button:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
 
 .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
 .switch input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+
 
 /* ------------------------------------------------------------------- lists */
 
@@ -333,4 +345,49 @@ tbody tr.section:hover td { background: var(--bg); }
 @media (max-width: 620px) {
   .admin-field-grid { grid-template-columns: 1fr; }
 }
+
+.admin-clickable-row { cursor: pointer; }
+.admin-audit-subheader td {
+  background: var(--bg);
+  font-weight: 600;
+  padding-top: 12px;
+}
+#episode-rows input[type="text"],
+#episode-rows input[type="number"] {
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+/* ----------------------------------------------------------------- episodes */
+
+.episode-toggle {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  padding: 2px 6px; font-size: 11px; border-radius: 6px; cursor: pointer;
+  margin-right: 4px;
+}
+.episode-toggle:hover { background: var(--card2); border-color: var(--border); }
+
+tr.episode-rows td { padding: 0; border-bottom: 1px solid var(--border); }
+
+.episode-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 10px 5px 40px; font-size: 12.5px; color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.episode-row:last-child { border-bottom: none; }
+.episode-row.watched .episode-title { color: var(--muted); text-decoration: line-through; }
+.episode-row.episode-no-data { padding-left: 40px; color: var(--muted); }
+
+.episode-num {
+  font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text);
+  flex: none; width: 30px;
+}
+.episode-title { flex: 1; color: var(--text); }
+.episode-runtime { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.episode-watch { flex: none; display: flex; align-items: center; cursor: pointer; }
+.episode-watch input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+.badge.needs-review { border-color: #5a4413; color: var(--accent2); }
+
+.season-progress { color: var(--muted); font-size: 11px; white-space: nowrap; }
 `;

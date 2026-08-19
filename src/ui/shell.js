@@ -128,6 +128,239 @@ function showError(message) {
   box.classList.remove("hide");
 }
 
+/**
+ * Episode display/tracking, shared by every page that shows a TV season row
+ * (release.js, chronological.js, consolidated.js, dashboard.js watchlist).
+ * Each page owns its own season row markup and status control; this only
+ * covers the expand toggle and the episode rows underneath it.
+ *
+ * Usage: a season row gets an `episodeToggle(itemId)` button (or any element
+ * with data-episode-toggle="<itemId>"), and an empty following `<tr
+ * class="episode-rows" data-episode-rows="<itemId>">` container row that
+ * episode rows get injected into on first expand. Call
+ * `wireEpisodeToggles(container, colspan)` once after rendering rows, and
+ * `episodeMarkAll(itemId, watched)` from a season-level "mark all" control.
+ */
+function episodeToggleHtml(itemId) {
+  return (
+    '<button type="button" class="episode-toggle" data-episode-toggle="' +
+    itemId +
+    '" aria-expanded="false" aria-label="Show episodes">▶</button>'
+  );
+}
+
+function episodeRowsContainerHtml(itemId, colspan) {
+  return (
+    '<tr class="episode-rows hide" data-episode-rows="' +
+    itemId +
+    '"><td colspan="' +
+    colspan +
+    '" style="padding:0"></td></tr>'
+  );
+}
+
+function needsReviewBadge() {
+  return '<span class="badge needs-review" title="Episode title looks generic — check admin panel">needs review</span>';
+}
+
+function looksGeneric(title, episodeNumber) {
+  if (!title) return true;
+  const t = title.trim().toLowerCase();
+  return t === "" || t === "episode " + episodeNumber || /^episode\s+0*\d+$/.test(t);
+}
+
+function episodeRowHtml(itemId, ep, watched) {
+  const numLabel = "E" + String(ep.episode_number).padStart(2, "0");
+  const title = ep.title && !looksGeneric(ep.title, ep.episode_number) ? ep.title : "Episode " + String(ep.episode_number).padStart(2, "0");
+  const review = looksGeneric(ep.title, ep.episode_number) ? " " + needsReviewBadge() : "";
+  const estimate = ep.is_estimate ? ' <span class="badge est" title="Runtime is an estimate">est</span>' : "";
+
+  return (
+    '<div class="episode-row' +
+    (watched ? " watched" : "") +
+    '" data-episode-id="' +
+    ep.id +
+    '">' +
+    '<span class="episode-num">' +
+    numLabel +
+    "</span>" +
+    '<span class="episode-title">' +
+    esc(title) +
+    "</span>" +
+    review +
+    '<span class="episode-runtime">' +
+    (ep.runtime_min === null || ep.runtime_min === undefined ? "—" : formatRuntime(ep.runtime_min)) +
+    "</span>" +
+    estimate +
+    '<label class="episode-watch"><input type="checkbox" class="episode-watch-cb" data-item-id="' +
+    itemId +
+    '" data-episode-id="' +
+    ep.id +
+    '"' +
+    (watched ? " checked" : "") +
+    ' aria-label="Mark episode watched"></label>' +
+    "</div>"
+  );
+}
+
+function episodeNoDataHtml() {
+  return (
+    '<div class="episode-row episode-no-data">' +
+    '<span class="episode-title muted">No episode data — check admin panel</span> ' +
+    needsReviewBadge() +
+    "</div>"
+  );
+}
+
+function episodeLoadingHtml() {
+  return '<div class="episode-row episode-no-data"><span class="muted">Loading episodes…</span></div>';
+}
+
+function episodeProgressLabel(itemId) {
+  const cached = EPISODE_CACHE.get(itemId);
+  if (!cached) return null;
+  const watchedCount = cached.episodes.filter(function (ep) {
+    return cached.statuses.get(ep.id) === "watched";
+  }).length;
+  return "(" + watchedCount + "/" + cached.episodes.length + " watched)";
+}
+
+async function loadEpisodeData(itemId) {
+  if (EPISODE_CACHE.has(itemId)) return EPISODE_CACHE.get(itemId);
+
+  const [epRes, statusRes] = await Promise.all([
+    apiGet("/api/items/" + itemId + "/episodes"),
+    apiGet("/api/watch/episodes?item_id=" + itemId),
+  ]);
+
+  const episodes = (epRes.data && epRes.data.episodes) || [];
+  const statuses = new Map();
+  for (const row of (statusRes.data && statusRes.data.watch_status) || []) {
+    statuses.set(row.episode_id, row.status);
+  }
+
+  const entry = { episodes: episodes, statuses: statuses };
+  EPISODE_CACHE.set(itemId, entry);
+  return entry;
+}
+
+async function renderEpisodeRows(itemId, cell, onProgressChange) {
+  const data = await loadEpisodeData(itemId);
+  if (!data.episodes.length) {
+    cell.innerHTML = episodeNoDataHtml();
+    return;
+  }
+
+  cell.innerHTML = data.episodes
+    .map(function (ep) {
+      return episodeRowHtml(itemId, ep, data.statuses.get(ep.id) === "watched");
+    })
+    .join("");
+
+  for (const cb of cell.querySelectorAll(".episode-watch-cb")) {
+    cb.addEventListener("change", function (ev) {
+      onEpisodeWatchToggle(ev, onProgressChange);
+    });
+  }
+}
+
+async function onEpisodeWatchToggle(ev, onProgressChange) {
+  const cb = ev.target;
+  const itemId = Number(cb.getAttribute("data-item-id"));
+  const episodeId = Number(cb.getAttribute("data-episode-id"));
+  const next = cb.checked ? "watched" : "unwatched";
+  const data = EPISODE_CACHE.get(itemId);
+  const previous = data ? data.statuses.get(episodeId) || "unwatched" : "unwatched";
+
+  cb.disabled = true;
+  try {
+    await apiPost("/api/watch", { item_id: itemId, episode_id: episodeId, status: next });
+    if (data) data.statuses.set(episodeId, next);
+    const row = cb.closest(".episode-row");
+    if (row) row.classList.toggle("watched", next === "watched");
+    if (onProgressChange) onProgressChange(itemId);
+  } catch (e) {
+    cb.checked = previous === "watched";
+    showError("Could not save that change: " + e.message);
+  } finally {
+    cb.disabled = false;
+  }
+}
+
+async function apiPost(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.status;
+    try {
+      detail = (await res.json()).error || detail;
+    } catch (e) {}
+    throw new Error(String(detail));
+  }
+  return res.json();
+}
+
+/** Marks every episode of an item watched/unwatched, mirroring a season-level "mark all". */
+async function episodeMarkAll(itemId, watched) {
+  const data = await loadEpisodeData(itemId);
+  const next = watched ? "watched" : "unwatched";
+  for (const ep of data.episodes) {
+    await apiPost("/api/watch", { item_id: itemId, episode_id: ep.id, status: next });
+    data.statuses.set(ep.id, next);
+  }
+  const cell = document.querySelector('tr[data-episode-rows="' + itemId + '"] td');
+  if (cell && !cell.querySelector(".episode-no-data")) {
+    for (const row of cell.querySelectorAll(".episode-row")) {
+      row.classList.toggle("watched", watched);
+      const cb = row.querySelector(".episode-watch-cb");
+      if (cb) cb.checked = watched;
+    }
+  }
+}
+
+/** Wires every episode-toggle button under `container` to lazily expand its episode row. */
+function wireEpisodeToggles(container, onProgressChange) {
+  for (const btn of container.querySelectorAll("[data-episode-toggle]")) {
+    btn.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      onEpisodeToggleClick(btn, container, onProgressChange);
+    });
+  }
+}
+
+async function onEpisodeToggleClick(btn, container, onProgressChange) {
+  const itemId = btn.getAttribute("data-episode-toggle");
+  const row = container.querySelector('tr[data-episode-rows="' + itemId + '"]');
+  if (!row) return;
+
+  const expanded = btn.getAttribute("aria-expanded") === "true";
+  if (expanded) {
+    btn.setAttribute("aria-expanded", "false");
+    btn.textContent = "▶";
+    row.classList.add("hide");
+    return;
+  }
+
+  btn.setAttribute("aria-expanded", "true");
+  btn.textContent = "▼";
+  row.classList.remove("hide");
+
+  const cell = row.querySelector("td");
+  if (!cell.dataset.loaded) {
+    cell.innerHTML = episodeLoadingHtml();
+    try {
+      await renderEpisodeRows(Number(itemId), cell, onProgressChange);
+      cell.dataset.loaded = "1";
+    } catch (e) {
+      cell.innerHTML = '<div class="episode-row muted">Could not load episodes.</div>';
+    }
+  }
+}
+
 function initNav() {
   const btn = document.getElementById("menu-btn");
   const rail = document.getElementById("rail");
@@ -367,12 +600,33 @@ const RUNTIME_FNS = [
   showError,
   initNav,
   initSignedInLabel,
+  episodeToggleHtml,
+  episodeRowsContainerHtml,
+  needsReviewBadge,
+  looksGeneric,
+  episodeRowHtml,
+  episodeNoDataHtml,
+  episodeLoadingHtml,
+  episodeProgressLabel,
+  loadEpisodeData,
+  renderEpisodeRows,
+  onEpisodeWatchToggle,
+  apiPost,
+  episodeMarkAll,
+  wireEpisodeToggles,
+  onEpisodeToggleClick,
 ].map(reflect);
 
-const CLIENT_RUNTIME = normalizeNames(
-  RUNTIME_FNS,
-  RUNTIME_FNS.map((r) => r.src).join("\n\n")
-);
+// Not one of RUNTIME_FNS's reflected functions (those are serialized
+// independently via toString() and share no closure once reflected) — this
+// module-level cache has to be its own statement in the generated script so
+// loadEpisodeData/renderEpisodeRows/episodeMarkAll can all see the same Map.
+const EPISODE_CACHE_DECL = "var EPISODE_CACHE = new Map();";
+
+const CLIENT_RUNTIME =
+  EPISODE_CACHE_DECL +
+  "\n\n" +
+  normalizeNames(RUNTIME_FNS, RUNTIME_FNS.map((r) => r.src).join("\n\n"));
 
 /* ------------------------------------------------------------- rendering -- */
 
