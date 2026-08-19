@@ -480,7 +480,11 @@ function dashboardMain() {
       classes.concat("wl-mobile-only").join(" ") +
       '">' +
       '<td colspan="6">' +
-      '<div class="wl-mobile-line1">' +
+      '<div class="wl-mobile-line1' +
+      (isTv ? " wl-mobile-line1-clickable" : "") +
+      '"' +
+      (isTv ? ' data-episode-toggle-target="' + item.id + '"' : "") +
+      ">" +
       (isTv ? episodeToggleHtml(item.id) + " " : "") +
       '<span class="title">' +
       esc(item.title) +
@@ -498,10 +502,12 @@ function dashboardMain() {
       '<span class="wl-mobile-date">' +
       esc(dateLabel) +
       "</span>" +
+      '<span class="wl-mobile-line2-actions">' +
       mobileStatusCell +
       '<button type="button" class="watchlist-remove" data-key="' +
       esc(key) +
       '" aria-label="Remove from watch list" title="Remove from watch list" style="background:none;border:none;cursor:pointer;font-size:14px">✕</button>' +
+      "</span>" +
       "</div>" +
       "</td>" +
       "</tr>";
@@ -672,6 +678,21 @@ function dashboardMain() {
     if (parent) parent.addEventListener("click", onWatchedGroupToggle);
 
     wireEpisodeToggles($("watchlist-rows"));
+
+    // Mobile: the whole line-1 div is a tap target for TV rows, mirroring
+    // the ▶ arrow's own expand/collapse — clicking the arrow itself already
+    // triggers it via wireEpisodeToggles above (and stops propagation there),
+    // so this only needs to act when some other part of the line was tapped.
+    for (const line of $("watchlist-rows").querySelectorAll(".wl-mobile-line1-clickable")) {
+      line.addEventListener("click", onWatchlistLine1Click);
+    }
+  }
+
+  function onWatchlistLine1Click(ev) {
+    if (ev.target.closest(".episode-toggle")) return;
+    const line = ev.currentTarget;
+    const toggle = line.querySelector(".episode-toggle");
+    if (toggle) toggle.click();
   }
 
   function onWatchedGroupToggle(ev) {

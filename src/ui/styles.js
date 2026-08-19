@@ -394,14 +394,75 @@ tbody tr.section:hover td { background: var(--bg); }
    display at a given width; both always exist in the DOM. */
 .wl-mobile-only { display: none; }
 
-.wl-mobile-line1, .wl-mobile-line2 {
-  display: flex; align-items: center; gap: 8px;
+/* Type badge left / date centered / status+remove right. A flex row with
+   justify-content:space-between centers the date only relative to its
+   actual neighbors, so a wider or narrower badge shifts the date off the
+   row's true center. A 3-column grid removes that dependency the same way
+   line 1's does: the badge sits in column 1 (its own natural width, left
+   aligned), the date is centered within column 2 regardless of what widths
+   columns 1/3 end up being, and the status checkbox + remove button share
+   column 3, right aligned as a pair. */
+.wl-mobile-line2 {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
 }
-.wl-mobile-line1 { justify-content: space-between; font-weight: 500; }
-.wl-mobile-line1 .title { font-weight: 700; }
-.wl-mobile-runtime { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.wl-mobile-line2 { justify-content: space-between; margin-top: 6px; }
-.wl-mobile-date { color: var(--muted); font-size: 12px; flex: 1; text-align: center; }
+.wl-mobile-line2 .badge {
+  grid-column: 1;
+  justify-self: start;
+}
+.wl-mobile-date {
+  grid-column: 2;
+  color: var(--muted); font-size: 12px; text-align: center;
+}
+.wl-mobile-line2-actions {
+  grid-column: 3;
+  display: flex; align-items: center; gap: 8px;
+  justify-self: end;
+}
+.wl-mobile-line2 .title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Arrow left / title centered / runtime right, using the exact same
+   1fr auto 1fr grid as .wl-mobile-line2 below — that's what actually keeps
+   the title (line 1) and the date (line 2) sitting at the same horizontal
+   center point, since both lines' middle column now lands at the same
+   position regardless of what's in column 1/3 on either line. Non-TV rows
+   render no arrow, so column 1 is simply empty on those rows — the title
+   still centers correctly because centering comes from the column
+   structure, not from a matching sibling. */
+.wl-mobile-line1 {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.wl-mobile-line1 .episode-toggle {
+  grid-column: 1;
+  justify-self: start;
+  text-align: center; padding: 2px 0; margin-right: 0;
+}
+.wl-mobile-line1 .title {
+  grid-column: 2;
+  text-align: center;
+  font-weight: 700;
+  padding: 0 8px;
+}
+.wl-mobile-runtime {
+  grid-column: 3;
+  justify-self: end;
+  color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* Applied only to TV rows (see watchlistRowHtml in dashboard.js) so the whole
+   line becomes a bigger tap target for expand/collapse, matching the
+   touch-friendly-target rule used elsewhere for mobile. Non-TV rows have no
+   handler bound and keep the default cursor. */
+.wl-mobile-line1-clickable { cursor: pointer; }
 
 @media (max-width: 768px) {
   /* Column headers describe the desktop per-column layout, which the mobile
@@ -416,6 +477,35 @@ tbody tr.section:hover td { background: var(--bg); }
   .wl-desktop-only { display: none; }
   .wl-mobile-only { display: table-row; }
   .wl-mobile-only td { padding: 10px; }
+
+  /* Groups the season row and its expanded episode rows into one visually
+     bordered block. There's no wrapper element around the pair — mobileRow
+     and its episode-rows <tr> are plain siblings in the table (see
+     watchlistRowHtml in dashboard.js) — so the border is faked across the
+     two adjacent rows' <td>s instead of drawn on a container: the season
+     row's <td> gets top+left+right plus rounded top corners, and the
+     episode-rows <tr>'s <td> (only reachable via the preceding-sibling
+     combinator, since :has(+) can't select backwards) gets left+right+bottom
+     with rounded bottom corners. Drawing on the <td>s rather than the inner
+     line1/line2 divs keeps both halves flush at the same horizontal edge
+     (the divs sit 10px padding inset from the td, which would otherwise
+     misalign the shared side borders where the two rows meet). */
+  tr[data-key]:has(+ tr.episode-rows:not(.hide)) > td {
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    background: #222640;
+  }
+  tr.episode-rows:not(.hide) > td {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+    background: #222640;
+  }
 }
 
 /* -------------------------------------------------------------------- admin */
