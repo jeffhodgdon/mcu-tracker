@@ -363,46 +363,73 @@ async function onEpisodeToggleClick(btn, container, onProgressChange) {
 
 function initNav() {
   const btn = document.getElementById("menu-btn");
-  const rail = document.getElementById("rail");
-  if (!btn || !rail) return;
+  const drawer = document.getElementById("drawer");
+  const overlay = document.getElementById("drawer-overlay");
+  if (!btn || !drawer || !overlay) return;
+
+  function openDrawer() {
+    drawer.classList.add("open");
+    overlay.classList.remove("hide");
+    btn.setAttribute("aria-expanded", "true");
+  }
+
+  function closeDrawer() {
+    drawer.classList.remove("open");
+    overlay.classList.add("hide");
+    btn.setAttribute("aria-expanded", "false");
+  }
+
   btn.addEventListener("click", function () {
-    const open = rail.classList.toggle("open");
-    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (drawer.classList.contains("open")) closeDrawer();
+    else openDrawer();
   });
+  overlay.addEventListener("click", closeDrawer);
+  for (const link of drawer.querySelectorAll(".nav a")) {
+    link.addEventListener("click", closeDrawer);
+  }
 }
 
 async function initSignedInLabel() {
   try {
     const me = await apiGet("/api/me");
-    const box = document.getElementById("whoami");
-    if (!box) return me;
-    if (me.signedIn) {
-      box.innerHTML =
-        '<div class="who">' +
-        esc(me.data.user.email) +
-        '</div><button id="logout" style="margin-top:8px;padding:5px 9px;font-size:12px">Sign out</button>';
-      const out = document.getElementById("logout");
-      out.addEventListener("click", async function () {
-        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
-        location.reload();
-      });
-      if (me.data.user.is_admin) {
-        const adminLink = document.getElementById("nav-admin");
-        if (adminLink) adminLink.classList.remove("hide");
+    // The nav rail is duplicated into the mobile drawer (shell.js's markup),
+    // so every "whoami"/"nav-admin" target is a class shared by both copies
+    // rather than a single id — querySelectorAll keeps them in sync instead
+    // of only ever updating whichever copy happened to match getElementById.
+    const boxes = [...document.querySelectorAll(".whoami")];
+    if (!boxes.length) return me;
+    for (const box of boxes) {
+      if (me.signedIn) {
+        box.innerHTML =
+          '<div class="who">' +
+          esc(me.data.user.email) +
+          '</div><button class="logout" style="margin-top:8px;padding:5px 9px;font-size:12px">Sign out</button>';
+        const out = box.querySelector(".logout");
+        out.addEventListener("click", async function () {
+          await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+          location.reload();
+        });
+        if (me.data.user.is_admin) {
+          for (const adminLink of document.querySelectorAll(".nav-admin")) {
+            adminLink.classList.remove("hide");
+          }
+        }
+      } else {
+        box.innerHTML = '<a class="btn-link" href="/api/auth/google">Sign in with Google</a>';
       }
-    } else {
-      box.innerHTML = '<a class="btn-link" href="/api/auth/google">Sign in with Google</a>';
     }
 
     try {
       const stats = await apiGet("/api/stats");
       const count = stats.data.user_count;
-      const line = document.createElement("div");
-      line.className = "muted";
-      line.style.fontSize = "11px";
-      line.style.marginBottom = "8px";
-      line.textContent = "Users Tracking: " + count;
-      box.insertBefore(line, box.firstChild);
+      for (const box of boxes) {
+        const line = document.createElement("div");
+        line.className = "muted";
+        line.style.fontSize = "11px";
+        line.style.marginBottom = "8px";
+        line.textContent = "Users Tracking: " + count;
+        box.insertBefore(line, box.firstChild);
+      }
     } catch (e) {
       // stats are decorative; skip silently if unavailable
     }
@@ -633,7 +660,7 @@ const CLIENT_RUNTIME =
 function navHtml(active) {
   return NAV.map((item) => {
     const current = item.id === active ? ' aria-current="page"' : "";
-    const cls = item.adminOnly ? ' class="hide" id="nav-admin"' : "";
+    const cls = item.adminOnly ? ' class="hide nav-admin"' : "";
     return '<a href="' + item.href + '"' + current + cls + ">" + item.label + "</a>";
   }).join("\n      ");
 }
@@ -663,16 +690,23 @@ export function renderPage(page) {
 <style>${STYLES}</style>
 </head>
 <body>
+<div class="topbar">
+  <button class="menu-btn" id="menu-btn" aria-expanded="false" aria-label="Toggle navigation" aria-controls="drawer">☰</button>
+  <div class="topbar-brand"><span>MCU Tracker</span><small>watch tracker</small></div>
+</div>
 <nav class="rail" id="rail">
-  <div class="topbar">
-    <div class="brand"><span class="dot"></span><span>MCU Tracker</span></div>
-    <button class="menu-btn" id="menu-btn" aria-expanded="false" aria-label="Toggle navigation">Menu</button>
-  </div>
   <div class="brand desktop-brand"><span class="dot"></span><span>MCU Tracker<small>watch tracker</small></span></div>
   <div class="nav">
       ${navHtml(page.active)}
   </div>
-  <div class="rail-foot" id="whoami"></div>
+  <div class="rail-foot whoami"></div>
+</nav>
+<div class="drawer-overlay hide" id="drawer-overlay"></div>
+<nav class="drawer" id="drawer">
+  <div class="nav">
+      ${navHtml(page.active)}
+  </div>
+  <div class="rail-foot whoami"></div>
 </nav>
 <main>
 <div class="content-wrap">

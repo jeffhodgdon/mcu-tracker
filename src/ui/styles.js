@@ -121,27 +121,58 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .3px; }
 .sub { color: var(--muted); margin: 0 0 22px; font-size: 13px; }
 
+/* Desktop: the fixed top bar, hamburger, drawer and overlay are all mobile-only
+   (see the max-width:768px block below) and stay fully hidden here. */
 .topbar { display: none; }
+.menu-btn {
+  background: transparent; color: var(--text);
+  border: none; border-radius: 8px;
+  width: 40px; height: 40px; font-size: 20px; line-height: 1; cursor: pointer;
+  flex: none;
+}
+.drawer-overlay { display: none; }
+.drawer { display: none; }
 
-@media (max-width: 820px) {
-  .rail {
-    position: sticky; top: 0; width: auto; height: auto;
-    border-right: 0; border-bottom: 1px solid var(--border);
-    padding: 12px 14px; gap: 12px; z-index: 20;
-  }
-  .rail .nav { display: none; }
-  .rail.open .nav { display: flex; }
-  .rail-foot { margin-top: 0; }
-  .desktop-brand { display: none; }
+@media (max-width: 768px) {
+  .rail { display: none; }
+
   .topbar {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    display: flex; align-items: center; gap: 8px;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+    height: 64px; padding: 0 10px;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
   }
-  .menu-btn {
-    background: var(--card2); color: var(--text);
-    border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 12px; font-size: 14px; cursor: pointer;
+  .topbar-brand {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    margin-right: 40px; /* balances the hamburger's width so the brand is truly centered */
+    font-weight: 700; font-size: 16px; letter-spacing: .3px; line-height: 1.3;
   }
-  main { margin-left: 0; padding: 18px 14px 60px; }
+  .topbar-brand small { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+
+  .drawer-overlay {
+    display: block;
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 30;
+  }
+
+  .drawer {
+    display: flex;
+    position: fixed; top: 64px; bottom: 0; left: 0;
+    width: min(280px, 82vw);
+    background: var(--card-bg);
+    border-right: 1px solid var(--border);
+    padding: 20px 14px;
+    flex-direction: column;
+    gap: 18px;
+    overflow-y: auto;
+    z-index: 35;
+    transform: translateX(-100%);
+    transition: transform .2s ease;
+  }
+  .drawer.open { transform: translateX(0); }
+
+  main { margin-left: 0; padding: 82px 14px 60px; }
 }
 
 /* ------------------------------------------------------------------- cards */
@@ -295,6 +326,12 @@ tbody tr.section:hover td { background: var(--bg); }
   gap: 8px;
   flex-wrap: wrap;
 }
+.filter-bar-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .filter-bar button {
   font-size: 13px;
   font-weight: 700;
@@ -317,6 +354,68 @@ tbody tr.section:hover td { background: var(--bg); }
 @media (max-width: 720px) {
   thead th.opt, tbody td.opt { display: none; }
   tbody td, thead th { padding: 8px 6px; }
+}
+
+/* ------------------------------------------------------ mobile table polish */
+
+@media (max-width: 768px) {
+  /* .card wraps every catalogue table with overflow:hidden — combined with
+     the narrower .opt-column set and text that can wrap/truncate below, this
+     keeps every table page (release, chronological, other, consolidated,
+     admin) from ever needing horizontal scroll on a narrow viewport. */
+  table { table-layout: fixed; }
+  table td, table th { overflow: hidden; text-overflow: ellipsis; }
+  table td:first-child, table th:first-child { white-space: normal; word-break: break-word; }
+
+  /* In-universe setting (chronological) has no fixed width and is the one
+     column long enough to need to truncate rather than wrap. */
+  .chrono-setting { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+
+  /* Touch-friendly tap targets: status selects, watch checkboxes and the
+     standalone icon buttons (remove/edit — a full table cell to themselves,
+     unlike .episode-toggle which sits inline before a title and stays
+     compact) all grow to at least 44px on their smaller axis. */
+  tbody td select { min-height: 44px; }
+  tbody td input[type="checkbox"] { width: 22px; height: 22px; }
+  .watchlist-remove, .episode-remove-btn, .admin-edit-btn {
+    min-width: 44px; min-height: 44px;
+  }
+}
+
+/* --------------------------------------------------- watchlist (dashboard) */
+
+.watchlist-mobile-head { display: none; }
+
+/* Each watchlist item renders as two sibling <tr>s — a desktop one with the
+   normal per-column <td>s, and a mobile one with a single <td colspan> holding
+   a <div>-based two-line layout — because flexbox does not apply to table
+   rows/cells in any browser, so a <tr>/<td> can't itself reflow at a
+   breakpoint the way a div can. CSS below picks exactly one of the pair to
+   display at a given width; both always exist in the DOM. */
+.wl-mobile-only { display: none; }
+
+.wl-mobile-line1, .wl-mobile-line2 {
+  display: flex; align-items: center; gap: 8px;
+}
+.wl-mobile-line1 { justify-content: space-between; font-weight: 500; }
+.wl-mobile-line1 .title { font-weight: 700; }
+.wl-mobile-runtime { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wl-mobile-line2 { justify-content: space-between; margin-top: 6px; }
+.wl-mobile-date { color: var(--muted); font-size: 12px; flex: 1; text-align: center; }
+
+@media (max-width: 768px) {
+  /* Column headers describe the desktop per-column layout, which the mobile
+     row replaces entirely with self-explanatory div markup — so a single
+     "My Watch List" label stands in for them instead. */
+  .watchlist-table thead tr:not(.watchlist-mobile-head) { display: none; }
+  .watchlist-table .watchlist-mobile-head { display: table-row; }
+  .watchlist-table .watchlist-mobile-head th {
+    padding: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+  }
+
+  .wl-desktop-only { display: none; }
+  .wl-mobile-only { display: table-row; }
+  .wl-mobile-only td { padding: 10px; }
 }
 
 /* -------------------------------------------------------------------- admin */

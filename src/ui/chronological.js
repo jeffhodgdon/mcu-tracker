@@ -28,6 +28,8 @@ const BODY = `
     <button type="button" data-filter="Special Presentation" aria-pressed="true">Special Presentation</button>
     <button type="button" data-filter="Marvel Television" aria-pressed="true">Marvel Television</button>
     <button type="button" data-filter="Animated Series" aria-pressed="true">Animated Series</button>
+  </div>
+  <div class="filter-bar-actions">
     <button type="button" class="filter-bar-ghost" id="filter-select-all">Select All</button>
     <button type="button" class="filter-bar-ghost" id="filter-deselect-all">Deselect All</button>
   </div>
@@ -135,9 +137,9 @@ function chronologicalMain() {
       '">' +
       esc(item.type) +
       "</span></td>" +
-      "<td>" +
+      '<td><span class="chrono-setting">' +
       esc(item.chrono_setting || "—") +
-      "</td>" +
+      "</span></td>" +
       '<td class="num opt">' +
       (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
       estimate +
@@ -272,9 +274,9 @@ function chronologicalMain() {
       '">' +
       esc(item.type) +
       "</span></td>" +
-      "<td>" +
+      '<td><span class="chrono-setting">' +
       esc(item.chrono_setting || "—") +
-      "</td>" +
+      "</span></td>" +
       '<td class="num opt">' +
       (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
       estimate +

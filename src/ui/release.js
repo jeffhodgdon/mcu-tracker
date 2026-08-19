@@ -27,6 +27,8 @@ const BODY = `
     <button type="button" data-filter="Special Presentation" aria-pressed="true">Special Presentation</button>
     <button type="button" data-filter="Marvel Television" aria-pressed="true">Marvel Television</button>
     <button type="button" data-filter="Animated Series" aria-pressed="true">Animated Series</button>
+  </div>
+  <div class="filter-bar-actions">
     <button type="button" class="filter-bar-ghost" id="filter-select-all">Select All</button>
     <button type="button" class="filter-bar-ghost" id="filter-deselect-all">Deselect All</button>
   </div>

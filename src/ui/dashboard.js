@@ -64,7 +64,7 @@ const BODY = `
     </div>
 
     <div class="card" id="watchlist-table-wrap" style="padding:0;overflow:hidden;margin-top:14px">
-      <table>
+      <table class="watchlist-table">
         <thead>
           <tr>
             <th style="width:44%;text-align:center">Title</th>
@@ -73,6 +73,9 @@ const BODY = `
             <th class="num" style="text-align:center">Runtime</th>
             <th style="width:130px;text-align:center">Status</th>
             <th style="width:36px;text-align:center"></th>
+          </tr>
+          <tr class="watchlist-mobile-head">
+            <th colspan="6" style="text-align:center">My Watch List</th>
           </tr>
         </thead>
         <tbody id="watchlist-rows"></tbody>
@@ -420,37 +423,90 @@ function dashboardMain() {
 
     const isTv = entry.source === "mcu" && TV_TYPES.indexOf(item.type) !== -1;
 
-    const row =
-      '<tr data-key="' +
-      esc(key) +
-      '" data-group="' +
-      (child ? "watched" : "") +
-      '" class="' +
+    const rowAttrs = ' data-key="' + esc(key) + '" data-group="' + (child ? "watched" : "") + '"';
+
+    // Table cells can't reflow across a media query — flexbox does not apply
+    // to <tr>/<td> in any browser — so mobile gets its own two-line
+    // <div>-based layout rendered as a sibling row instead, with CSS (not JS)
+    // choosing which of the two actually shows at a given width. Both rows
+    // share the same data-key/data-group/watched classes so every existing
+    // querySelectorAll(...) event wiring call (which iterates instead of
+    // looking up a single row by key) picks up both automatically.
+    const desktopRow =
+      "<tr" +
+      rowAttrs +
+      ' class="' +
       classes.join(" ") +
       '">' +
-      '<td style="text-align:left">' +
+      '<td class="wl-title wl-desktop-only" style="text-align:left">' +
       (isTv ? episodeToggleHtml(item.id) + " " : "") +
       '<span class="title">' +
       esc(item.title) +
       "</span></td>" +
-      '<td class="opt"><span class="badge" data-type="' +
+      '<td class="opt wl-type wl-desktop-only"><span class="badge" data-type="' +
       esc(typeLabel) +
       '">' +
       esc(typeLabel) +
       "</span></td>" +
-      '<td class="opt">' +
+      '<td class="opt wl-date wl-desktop-only">' +
       esc(dateLabel) +
       "</td>" +
-      '<td class="num">' +
+      '<td class="num wl-runtime wl-desktop-only">' +
       runtime +
       "</td>" +
-      "<td>" +
+      '<td class="wl-status wl-desktop-only">' +
       statusCell +
       "</td>" +
-      '<td><button type="button" class="watchlist-remove" data-key="' +
+      '<td class="wl-remove wl-desktop-only"><button type="button" class="watchlist-remove" data-key="' +
       esc(key) +
       '" aria-label="Remove from watch list" title="Remove from watch list" style="background:none;border:none;cursor:pointer;font-size:14px">✕</button></td>' +
       "</tr>";
+
+    const mobileStatusCell =
+      '<input type="checkbox" class="watchlist-watched-toggle" data-key="' +
+      esc(key) +
+      '" data-id="' +
+      item.id +
+      '" data-source="' +
+      esc(entry.source) +
+      '"' +
+      (status === "watched" ? " checked" : "") +
+      ' aria-label="Mark watched">';
+
+    const mobileRow =
+      "<tr" +
+      rowAttrs +
+      ' class="' +
+      classes.concat("wl-mobile-only").join(" ") +
+      '">' +
+      '<td colspan="6">' +
+      '<div class="wl-mobile-line1">' +
+      (isTv ? episodeToggleHtml(item.id) + " " : "") +
+      '<span class="title">' +
+      esc(item.title) +
+      "</span>" +
+      '<span class="wl-mobile-runtime">' +
+      runtime +
+      "</span>" +
+      "</div>" +
+      '<div class="wl-mobile-line2">' +
+      '<span class="badge" data-type="' +
+      esc(typeLabel) +
+      '">' +
+      esc(typeLabel) +
+      "</span>" +
+      '<span class="wl-mobile-date">' +
+      esc(dateLabel) +
+      "</span>" +
+      mobileStatusCell +
+      '<button type="button" class="watchlist-remove" data-key="' +
+      esc(key) +
+      '" aria-label="Remove from watch list" title="Remove from watch list" style="background:none;border:none;cursor:pointer;font-size:14px">✕</button>' +
+      "</div>" +
+      "</td>" +
+      "</tr>";
+
+    const row = desktopRow + mobileRow;
 
     if (!isTv) return row;
 
@@ -486,32 +542,69 @@ function dashboardMain() {
       : "release";
   }
 
-  // First year found in an other_universes "setting" string, e.g.
+  // First year found in a "setting"/"chrono_setting" string, e.g.
   // "1943 / 1993" -> 1943, "1845 - 1979" -> 1845. Settings with no year
-  // ("contemporary") sort after everything with a known year.
+  // ("contemporary") have no comparable position.
   function firstSettingYear(setting) {
     const m = /\d{4}/.exec(setting || "");
-    return m ? Number(m[0]) : Infinity;
+    return m ? Number(m[0]) : null;
+  }
+
+  // Other Universes items have no chrono_order (that field is specifically
+  // "position in chronological-order.csv", an MCU-only curated ranking — see
+  // migrations/0003_chrono_and_other_universes.sql) — only a free-text
+  // "setting" string, so they can't be compared against items.chrono_order
+  // directly on the same numeric scale (an MCU chrono_order like 7 is not
+  // remotely the same kind of number as a calendar year like 2010, so
+  // sorting the two together on that axis just pushes every Other Universe
+  // item to one end instead of truly interleaving them).
+  //
+  // Fixed by building a year -> chrono_order lookup from every MCU item that
+  // has both fields (chrono_order tracks chrono_setting's year closely, as
+  // it's the same underlying timeline), then mapping an Other Universe item's
+  // extracted year onto that same chrono_order scale via linear
+  // interpolation between the nearest known MCU years. That gives both sides
+  // a genuinely comparable sort key instead of concatenating one after the
+  // other.
+  function buildYearToChronoOrderScale() {
+    const points = [];
+    for (const item of state.items) {
+      if (item.chrono_order == null) continue;
+      const year = firstSettingYear(item.chrono_setting);
+      if (year === null) continue;
+      points.push({ year, order: item.chrono_order });
+    }
+    points.sort((a, b) => a.year - b.year);
+    return points;
+  }
+
+  function chronoOrderForYear(scale, year) {
+    if (!scale.length) return null;
+    if (year <= scale[0].year) return scale[0].order;
+    if (year >= scale[scale.length - 1].year) return scale[scale.length - 1].order;
+
+    for (let i = 0; i < scale.length - 1; i++) {
+      const lo = scale[i];
+      const hi = scale[i + 1];
+      if (year >= lo.year && year <= hi.year) {
+        if (hi.year === lo.year) return lo.order;
+        const t = (year - lo.year) / (hi.year - lo.year);
+        return lo.order + t * (hi.order - lo.order);
+      }
+    }
+    return null;
   }
 
   function sortWatchlistEntries(entries, mode) {
+    const chronoScale = mode === "chronological" ? buildYearToChronoOrderScale() : null;
+
     return entries.slice().sort((a, b) => {
       const itemA = findItem(a.source, a.item_id);
       const itemB = findItem(b.source, b.item_id);
 
       if (mode === "chronological") {
-        const ka =
-          a.source === "mcu"
-            ? itemA && itemA.chrono_order != null
-              ? itemA.chrono_order
-              : Infinity
-            : firstSettingYear(itemA && itemA.setting);
-        const kb =
-          b.source === "mcu"
-            ? itemB && itemB.chrono_order != null
-              ? itemB.chrono_order
-              : Infinity
-            : firstSettingYear(itemB && itemB.setting);
+        const ka = chronoSortKey(a, itemA, chronoScale);
+        const kb = chronoSortKey(b, itemB, chronoScale);
         if (ka === kb) return 0;
         return ka < kb ? -1 : 1;
       }
@@ -524,6 +617,20 @@ function dashboardMain() {
       if (da === db) return 0;
       return da < db ? -1 : 1;
     });
+  }
+
+  // A single comparable position on the chrono_order scale for either an MCU
+  // entry (chrono_order itself) or an Other Universe entry (its setting's
+  // year, mapped onto that same scale) — unplaced/unmappable entries sort
+  // last, per chronoOrderForYear's Infinity fallback below.
+  function chronoSortKey(entry, item, chronoScale) {
+    if (entry.source === "mcu") {
+      return item && item.chrono_order != null ? item.chrono_order : Infinity;
+    }
+    const year = item && firstSettingYear(item.setting);
+    if (year === null || year === undefined) return Infinity;
+    const mapped = chronoOrderForYear(chronoScale, year);
+    return mapped === null ? Infinity : mapped;
   }
 
   function renderWatchlistTable() {
