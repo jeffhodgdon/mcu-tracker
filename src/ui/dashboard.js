@@ -212,10 +212,10 @@ function dashboardMain() {
     return res.json();
   }
 
-  // Stats are scoped to the MCU catalogue's runtime data, not the whole
-  // watch list — "other" source entries have no runtime_min to roll up, so
-  // they are excluded from these totals even though their watch status is
-  // tracked.
+  // Stats cover the whole watch list, MCU and Other Universes alike —
+  // other_universes rows carry their own runtime_min just like items does,
+  // so there's nothing source-specific stopping either total from including
+  // them.
   function computeTotals() {
     let watched = 0;
     let remainingMinutes = 0;
@@ -223,7 +223,6 @@ function dashboardMain() {
     let total = 0;
 
     for (const entry of state.watchlist) {
-      if (entry.source !== "mcu") continue;
       const item = findItem(entry.source, entry.item_id);
       if (!item) continue;
 
@@ -527,9 +526,16 @@ function dashboardMain() {
     return row + episodeRow;
   }
 
+  // Same desktop/mobile sibling-<tr> split every other watchlist row uses
+  // (see watchlistRowHtml above) — this row previously rendered as a single
+  // untargeted <tr> with plain <td>s and no wl-mobile-only/wl-desktop-only
+  // split, so it had no mobile-specific layout at all and fell back to the
+  // browser's default table-cell flow, stacking the arrow/label/count on
+  // mobile instead of the arrow-left/label-centered/count-right line every
+  // other row gets from .wl-mobile-line1's grid.
   function watchedGroupParentHtml(count) {
-    return (
-      '<tr class="tv-parent" data-group="watched-parent" style="cursor:pointer">' +
+    const desktopRow =
+      '<tr class="tv-parent wl-desktop-only" data-group="watched-parent" style="cursor:pointer">' +
       '<td style="text-align:left"><span class="collapse-indicator">▶</span> <span class="title">Watched (' +
       count +
       ")</span></td>" +
@@ -538,8 +544,22 @@ function dashboardMain() {
       '<td class="num"></td>' +
       "<td></td>" +
       "<td></td>" +
-      "</tr>"
-    );
+      "</tr>";
+
+    const mobileRow =
+      '<tr class="tv-parent wl-mobile-only" data-group="watched-parent" style="cursor:pointer">' +
+      '<td colspan="6">' +
+      '<div class="wl-mobile-line1">' +
+      '<span class="collapse-indicator">▶</span>' +
+      '<span class="title">Watched (' +
+      count +
+      ")</span>" +
+      '<span class="wl-mobile-runtime"></span>' +
+      "</div>" +
+      "</td>" +
+      "</tr>";
+
+    return desktopRow + mobileRow;
   }
 
   function watchlistSortMode() {
@@ -674,8 +694,9 @@ function dashboardMain() {
     for (const btn of $("watchlist-rows").querySelectorAll(".watchlist-remove")) {
       btn.addEventListener("click", onWatchlistRemove);
     }
-    const parent = $("watchlist-rows").querySelector('tr.tv-parent[data-group="watched-parent"]');
-    if (parent) parent.addEventListener("click", onWatchedGroupToggle);
+    for (const parent of $("watchlist-rows").querySelectorAll('tr.tv-parent[data-group="watched-parent"]')) {
+      parent.addEventListener("click", onWatchedGroupToggle);
+    }
 
     wireEpisodeToggles($("watchlist-rows"));
 
@@ -698,9 +719,20 @@ function dashboardMain() {
   function onWatchedGroupToggle(ev) {
     if (ev.target.closest("select") || ev.target.closest("button")) return;
     const tr = ev.currentTarget;
-    const expanded = tr.classList.toggle("expanded");
-    const indicator = tr.querySelector(".collapse-indicator");
-    if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+    const expanded = !tr.classList.contains("expanded");
+
+    // Desktop and mobile each render their own copy of this row (see
+    // watchedGroupParentHtml above) sharing data-group="watched-parent" —
+    // apply the new state to both so they stay in sync regardless of which
+    // one was actually clicked, same pattern release.js/chronological.js use
+    // for their tv-parent rows.
+    for (const parent of $("watchlist-rows").querySelectorAll(
+      'tr.tv-parent[data-group="watched-parent"]'
+    )) {
+      parent.classList.toggle("expanded", expanded);
+      const indicator = parent.querySelector(".collapse-indicator");
+      if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+    }
     for (const child of $("watchlist-rows").querySelectorAll('tr.tv-child[data-group="watched"]')) {
       if (child.classList.contains("episode-rows")) {
         // Its own episode-toggle button controls reveal; collapsing the

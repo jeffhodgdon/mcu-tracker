@@ -575,6 +575,139 @@ tbody tr.section:hover td { background: var(--bg); }
     border-bottom-right-radius: 8px;
     background: #222640;
   }
+
+  /* Expanded franchise block (consolidated.js only — release.js/
+     chronological.js use the real nested-<div> bubbles below instead, since
+     their show/season/episode hierarchy needs true nesting, not adjacent
+     <tr>s). Wraps the whole run of expanded-group rows — parent + every
+     member row + their episode-rows containers — in a border, so it reads
+     as one grouped unit set apart from adjacent items. No wrapper element
+     exists around the run of <tr>s, so the border is faked on the first and
+     last row's <td> the same way the dashboard season block above does it. */
+  tr.wl-mobile-only.expanded-group.group-row > td {
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+  }
+  tr.wl-mobile-only.expanded-group.detail-row:not(.episode-rows) > td {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+  tr.expanded-group.episode-rows:not(.hide) > td {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+  /* Bottom edge of the block: the last visible row before the next
+     group-row (or the end of the table) closes off the border. Episode rows
+     can be hidden independently of their member row, so the closing row is
+     whichever of [member row, episode-rows] is actually last and visible. */
+  tr.wl-mobile-only.expanded-group.detail-row:not(.episode-rows):not(:has(+ tr.episode-rows:not(.hide))) > td {
+    border-bottom: 1px solid var(--border);
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+  }
+  tr.expanded-group.episode-rows:not(.hide):not(:has(+ tr.wl-mobile-only.detail-row)) > td {
+    border-bottom: 1px solid var(--border);
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+  }
+
+  /* ---- release.js / chronological.js: nested show > season > episode ---- */
+
+  /* Show bubble: the outermost level, holding the show header line plus
+     every season bubble nested inside it (see mobileGroupHtml in
+     release.js/chronological.js). This is real DOM containment — a <div>
+     wrapping <div>s — rather than the border-faking-on-adjacent-<tr>s
+     pattern used everywhere else in this file, which is why release.js
+     switched the whole mobile show block to a single <tr> with div markup:
+     show > season > episode nesting can't be faked across sibling <tr>s. */
+  .mobile-show-bubble {
+    padding: 10px;
+    margin: 4px 0;
+    border: 1px solid transparent;
+    border-radius: 8px;
+  }
+  /* Border/background only apply once expanded (.expanded is toggled on
+     this div by onParentToggle alongside the arrow/season-list state) — the
+     collapsed row otherwise inherits table.tbody tr's plain default
+     background, reading identically to a film row, and only gains the
+     bubble look once there's a nested season list underneath it to visually
+     contain. */
+  .mobile-show-bubble.expanded {
+    background: #1e2235;
+    border-color: var(--border);
+  }
+  .mobile-show-toggle { cursor: pointer; }
+
+  .mobile-season-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* Season bubble: nested one level inside the show bubble, a shade lighter
+     so the hierarchy reads at a glance. Own border+radius (not just a faked
+     top/bottom pair) since it's real DOM containment, not adjacent <tr>s. */
+  .mobile-season-bubble {
+    background: #242840;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .mobile-season-toggle { cursor: pointer; }
+  .mobile-season-bubble .wl-mobile-line1 .title { font-weight: 600; }
+
+  /* Season line 2: type badge / date / status dropdown share the same
+     1fr auto 1fr grid as .wl-mobile-line2 (defined outside this media
+     query) — the dropdown sits in the actions slot instead of getting its
+     own full-width line 3 (dropped below), matching how a flat film row's
+     line 2 carries its status control. */
+  .mobile-season-bubble .wl-mobile-line2-actions select,
+  .mobile-show-bubble .wl-mobile-line2-actions select {
+    min-height: 32px;
+    padding: 4px 8px;
+    font-size: 12.5px;
+  }
+
+  /* Episode bubble: nested one level inside the season bubble — indented and
+     another shade lighter again, closing out the show/season/episode
+     hierarchy (lightest of the three, per the show < season < episode
+     lightness ramp). Episode rows load lazily on first expand (see
+     onMobileSeasonToggle in release.js/chronological.js), same lazy-load
+     behavior as the desktop episode-toggle button. */
+  .mobile-episode-bubble {
+    margin-top: 8px;
+    margin-left: 8px;
+    background: #2a2f4a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  /* .episode-row itself (defined further down this file) is a single flex
+     line — num, title, badges, runtime, watch checkbox — designed for the
+     much wider desktop-table <td> it originally shipped in. Nested three
+     bubbles deep there isn't room for the "needs review" badge and "est"
+     badge to share the line without squeezing .episode-title toward zero,
+     so both are hidden here and the row is tightened to num/title/
+     runtime/checkbox only, kept to one line with the title ellipsized
+     instead of wrapped — exactly what's asked for (E01  Title…  0h 50m  ☐). */
+  .mobile-episode-bubble .episode-row {
+    padding: 4px 8px;
+    gap: 6px;
+  }
+  .mobile-episode-bubble .episode-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: normal;
+  }
+  .mobile-episode-bubble .badge.needs-review,
+  .mobile-episode-bubble .badge.est {
+    display: none;
+  }
 }
 
 /* -------------------------------------------------------------------- admin */
@@ -672,6 +805,6 @@ tr.episode-rows td { padding: 0; border-bottom: 1px solid var(--border); }
    of these rows' <td>s set their own background, so it shows straight
    through. */
 tr.expanded-group {
-  background: var(--card2);
+  background: #222640;
 }
 `;

@@ -42,6 +42,10 @@ function consolidatedMain() {
         ? '<div class="stat-note">' + g.unreleased_count + " unreleased</div>"
         : "";
     const rowAttrs = ' data-idx="' + index + '"';
+    // Only franchises with more than one entry render member rows (see
+    // memberRows below) and are actually expandable — the arrow should
+    // match that, not appear on every row.
+    const indicator = g.entry_count > 1 ? '<span class="collapse-indicator">▶</span>' : "";
 
     const desktopRow =
       "<tr" +
@@ -73,6 +77,7 @@ function consolidatedMain() {
       ' class="group-row wl-mobile-only" style="cursor:pointer">' +
       '<td colspan="5">' +
       '<div class="wl-mobile-line1">' +
+      indicator +
       '<span class="title">' +
       esc(g.base_title) +
       "</span>" +
@@ -183,6 +188,8 @@ function consolidatedMain() {
 
         for (const group of $("rows").querySelectorAll('tr.group-row[data-idx="' + idx + '"]')) {
           group.classList.toggle("expanded-group", expanded);
+          const indicator = group.querySelector(".collapse-indicator");
+          if (indicator) indicator.textContent = expanded ? "▼" : "▶";
         }
 
         for (const detail of $("rows").querySelectorAll(

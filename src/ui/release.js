@@ -285,14 +285,58 @@ function releaseMain() {
       "<td></td>" +
       "</tr>";
 
-    const mobileRow =
+    return desktopRow;
+  }
+
+  // Mobile-only render of a whole show block: the show bubble, nested season
+  // bubbles, and (once expanded) nested episode bubbles — all inside ONE <tr>
+  // so the bubbles can genuinely nest via real DOM containment. Desktop stays
+  // on the original per-row <tr> layout (parentRowHtml/seasonRowHtml above);
+  // sibling <tr>s can only fake adjacency with matched top/bottom borders,
+  // which can't produce the show > season > episodes nesting this needs. See
+  // onParentToggle/onMobileSeasonToggle for how expand state is driven here
+  // instead of the hide/expanded-group classes the desktop rows use.
+  function mobileGroupHtml(group) {
+    const allWatched = group.items.every(function (it) {
+      return (state.statuses.get(it.id) || "unwatched") === "watched";
+    });
+    const hasRuntime = group.items.some(function (it) {
+      return it.runtime_min !== null;
+    });
+    const totalRuntime = group.items.reduce(function (sum, it) {
+      return sum + (it.runtime_min || 0);
+    }, 0);
+    const hasEstimate = group.items.some(function (it) {
+      return it.is_estimate;
+    });
+    const seasonCount = group.items.length;
+    const runtime =
+      (hasRuntime ? formatRuntime(totalRuntime) : '<span class="muted">—</span>') +
+      (hasEstimate ? ' <span class="badge est" title="Runtime is an estimate">est</span>' : "");
+    const watchedCls = allWatched ? " watched" : "";
+    const groupAttrs = ' data-group="' + esc(group.key) + '"';
+
+    const seasons = group.items.map((item) => mobileSeasonBubbleHtml(item, group.key)).join("");
+    // Master status: reflects "watched" only when every season already is,
+    // same all-or-nothing rule the show bubble's own watchedCls above uses;
+    // any other mix (including some seasons watched) reads as "unwatched" —
+    // there's no meaningful single "current status" across mismatched
+    // seasons, so this only ever shows a real value once the group is fully
+    // watched, and otherwise defaults to the unset state.
+    const masterStatus = allWatched ? "watched" : "unwatched";
+    const masterSelect = groupMasterSelectHtml(group.key, masterStatus);
+
+    return (
       '<tr class="tv-parent wl-mobile-only' +
       watchedCls +
       '"' +
       groupAttrs +
-      ' style="cursor:pointer">' +
+      ">" +
       '<td colspan="6">' +
-      '<div class="wl-mobile-line1">' +
+      '<div class="mobile-show-bubble">' +
+      '<div class="wl-mobile-line1 wl-mobile-line1-clickable mobile-show-toggle"' +
+      groupAttrs +
+      ">" +
       '<span class="collapse-indicator">▶</span>' +
       '<span class="title">' +
       esc(group.base) +
@@ -308,12 +352,90 @@ function releaseMain() {
       " season" +
       (seasonCount === 1 ? "" : "s") +
       "</span>" +
-      '<span class="wl-mobile-line2-actions"></span>' +
+      '<span class="wl-mobile-line2-actions">' +
+      masterSelect +
+      "</span>" +
+      "</div>" +
+      '<div class="mobile-season-list hide">' +
+      seasons +
+      "</div>" +
       "</div>" +
       "</td>" +
-      "</tr>";
+      "</tr>"
+    );
+  }
 
-    return desktopRow + mobileRow;
+  // Master status control on a show bubble's line 2 (mobile only) — acts as
+  // a bulk "mark all seasons" switch, same semantics as each season's own
+  // season-mark-all select (seasonSelectHtml) but scoped to every season in
+  // the group instead of one item's episodes. See onGroupMarkAllChange.
+  function groupMasterSelectHtml(groupKey, status) {
+    return (
+      '<select data-group-mark-all="' +
+      esc(groupKey) +
+      '"' +
+      (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
+      ">" +
+      statusOptions(status) +
+      "</select>"
+    );
+  }
+
+  function mobileSeasonBubbleHtml(item, groupKey) {
+    const status = state.statuses.get(item.id) || "unwatched";
+    const estimate = item.is_estimate
+      ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
+      : "";
+    const seasonNum = seasonNumberOf(item.title);
+    const seasonLabel = seasonNum !== null ? "Season " + seasonNum : item.title;
+    const runtime =
+      (item.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(item.runtime_min)) +
+      estimate;
+    const watchedCls = status === "watched" ? " watched" : "";
+    const progressSpan = '<span class="season-progress" data-season-progress="' + item.id + '"></span>';
+    const statusCell = seasonSelectHtml(item.id, status);
+    const itemAttrs =
+      ' data-id="' + item.id + '" data-group="' + esc(groupKey) + '" data-type="' + esc(item.type) + '"';
+
+    return (
+      '<div class="mobile-season-bubble' +
+      watchedCls +
+      '"' +
+      itemAttrs +
+      ">" +
+      '<div class="wl-mobile-line1 wl-mobile-line1-clickable mobile-season-toggle" data-mobile-season-toggle="' +
+      item.id +
+      '">' +
+      '<span class="collapse-indicator">▶</span>' +
+      '<span class="title">' +
+      esc(seasonLabel) +
+      "</span>" +
+      '<span class="wl-mobile-runtime">' +
+      runtime +
+      "</span>" +
+      "</div>" +
+      '<div class="wl-mobile-line2">' +
+      '<span class="wl-mobile-line2-left">' +
+      '<span class="badge" data-type="' +
+      esc(item.type) +
+      '">' +
+      esc(item.type) +
+      "</span>" +
+      "</span>" +
+      '<span class="wl-mobile-date"><span class="rt-mobile-label">RD</span>' +
+      esc(displayDate(item.release_date)) +
+      " " +
+      progressSpan +
+      "</span>" +
+      '<span class="wl-mobile-line2-actions">' +
+      statusCell +
+      "</span>" +
+      "</div>" +
+      '<div class="mobile-episode-bubble hide" data-mobile-episode-rows="' +
+      item.id +
+      '"></div>' +
+      "</div>"
+    );
   }
 
   function seasonRowHtml(item, groupKey) {
@@ -371,47 +493,16 @@ function releaseMain() {
       "</td>" +
       "</tr>";
 
-    const mobileRow =
-      "<tr" +
-      rowAttrs +
-      ' class="tv-child hide wl-mobile-only' +
-      watchedCls +
-      '">' +
-      '<td colspan="6" class="rt-mobile-indent">' +
-      '<div class="wl-mobile-line1">' +
-      episodeToggleHtml(item.id) +
-      '<span class="title">' +
-      esc(seasonLabel) +
-      "</span>" +
-      '<span class="wl-mobile-runtime">' +
-      runtime +
-      "</span>" +
-      "</div>" +
-      '<div class="wl-mobile-line2">' +
-      '<span class="wl-mobile-line2-left">' +
-      '<span class="badge" data-type="' +
-      esc(item.type) +
-      '">' +
-      esc(item.type) +
-      "</span>" +
-      '<span class="rt-mobile-phase">' +
-      esc(item.phase || "—") +
-      "</span>" +
-      "</span>" +
-      '<span class="wl-mobile-date"><span class="rt-mobile-label">RD</span>' +
-      esc(displayDate(item.release_date)) +
-      " " +
-      progressSpan +
-      "</span>" +
-      '<span class="wl-mobile-line2-actions"></span>' +
-      "</div>" +
-      '<div class="wl-mobile-line3">' +
-      statusCell +
-      "</div>" +
-      "</td>" +
-      "</tr>";
-
-    return desktopRow + mobileRow + episodeRowsContainerHtml(item.id, 6);
+    // episodeRowsContainerHtml's <tr> has no wl-desktop-only/wl-mobile-only
+    // class of its own (dashboard.js/consolidated.js show it unconditionally
+    // since they don't split episode rows per breakpoint) — release.js does,
+    // via its own mobile-episode-bubble div in mobileSeasonBubbleHtml, so
+    // this desktop-table copy needs the class added to stay hidden on mobile
+    // instead of showing twice.
+    return desktopRow + episodeRowsContainerHtml(item.id, 6).replace(
+      'class="episode-rows hide"',
+      'class="episode-rows hide wl-desktop-only"'
+    );
   }
 
   // Today's date as "YYYY-MM-DD" in America/New_York, consistent with the
@@ -459,6 +550,7 @@ function releaseMain() {
         state.groups.set(group.key, group);
         html.push(parentRowHtml(group));
         for (const item of group.items) html.push(seasonRowHtml(item, group.key));
+        html.push(mobileGroupHtml(group));
       } else {
         html.push(rowHtml(group.items[0]));
       }
@@ -477,8 +569,17 @@ function releaseMain() {
     for (const sel of $("rows").querySelectorAll("select.season-mark-all")) {
       sel.addEventListener("change", onSeasonMarkAllChange);
     }
-    for (const tr of $("rows").querySelectorAll("tr.tv-parent")) {
+    for (const sel of $("rows").querySelectorAll("select[data-group-mark-all]")) {
+      sel.addEventListener("change", onGroupMarkAllChange);
+    }
+    for (const tr of $("rows").querySelectorAll("tr.tv-parent.wl-desktop-only")) {
       tr.addEventListener("click", onParentToggle);
+    }
+    for (const toggle of $("rows").querySelectorAll(".mobile-show-toggle")) {
+      toggle.addEventListener("click", onParentToggle);
+    }
+    for (const toggle of $("rows").querySelectorAll(".mobile-season-toggle")) {
+      toggle.addEventListener("click", onMobileSeasonToggle);
     }
     wireEpisodeToggles($("rows"), refreshSeasonProgress);
 
@@ -516,11 +617,40 @@ function releaseMain() {
     }
   }
 
+  // Master status control on a show bubble's line 2 (mobile only, see
+  // groupMasterSelectHtml above): applies the chosen status to every season
+  // in the group, one at a time, reusing the same per-season season-mark-all
+  // select each season already has — each season's own change event fires
+  // its normal onSeasonMarkAllChange handling (including its episode
+  // mark-all), so this loop only has to drive the select's value and
+  // dispatch the event rather than duplicate that logic.
+  async function onGroupMarkAllChange(ev) {
+    const select = ev.target;
+    const key = select.getAttribute("data-group-mark-all");
+    const next = select.value;
+
+    select.disabled = true;
+    try {
+      const seasonSelects = $("rows").querySelectorAll(
+        '.mobile-season-bubble[data-group="' + key + '"] select.season-mark-all'
+      );
+      for (const seasonSelect of seasonSelects) {
+        if (seasonSelect.value === next) continue;
+        seasonSelect.value = next;
+        seasonSelect.dispatchEvent(new Event("change"));
+      }
+    } finally {
+      select.disabled = !state.signedIn ? true : false;
+    }
+  }
+
   // The desktop and mobile rows for an item are separate sibling <tr>s (see
   // rowHtml/seasonRowHtml), each with its own status <select> — keeps both in
   // sync with whichever one the user actually changed.
   function syncItemRow(itemId, status) {
-    for (const row of $("rows").querySelectorAll('tr[data-id="' + itemId + '"]')) {
+    for (const row of $("rows").querySelectorAll(
+      'tr[data-id="' + itemId + '"], .mobile-season-bubble[data-id="' + itemId + '"]'
+    )) {
       row.classList.toggle("watched", status === "watched");
     }
     for (const sel of $("rows").querySelectorAll(
@@ -538,25 +668,34 @@ function releaseMain() {
   // type, while a mixed-type group stays visible as long as any season does.
   function applyTypeFilter() {
     let visible = 0;
-    for (const row of $("rows").querySelectorAll("tr[data-type]")) {
+    for (const row of $("rows").querySelectorAll("tr[data-type], .mobile-season-bubble[data-type]")) {
       const shown = state.activeTypes.has(row.getAttribute("data-type"));
       row.classList.toggle("filtered-out", !shown);
-      // Desktop and mobile render as two sibling <tr>s per item (both carry
-      // data-type) — count only one copy so the "Showing N of M" total isn't
-      // doubled.
+      // Desktop <tr> and mobile .mobile-season-bubble div both carry
+      // data-type for the same item — count only the desktop copy so the
+      // "Showing N of M" total isn't doubled.
       if (shown && row.classList.contains("wl-desktop-only")) visible++;
 
       const itemId = row.getAttribute("data-id");
       const episodeRow = itemId && $("rows").querySelector('tr.episode-rows[data-episode-rows="' + itemId + '"]');
       if (episodeRow) episodeRow.classList.toggle("filtered-out", !shown);
     }
-    for (const parent of $("rows").querySelectorAll("tr.tv-parent")) {
+    for (const parent of $("rows").querySelectorAll("tr.tv-parent.wl-desktop-only")) {
       const key = parent.getAttribute("data-group");
       const children = $("rows").querySelectorAll(
         'tr.tv-child[data-group="' + key + '"]'
       );
       const anyVisible = [...children].some((c) => !c.classList.contains("filtered-out"));
       parent.classList.toggle("filtered-out", !anyVisible);
+    }
+    for (const toggle of $("rows").querySelectorAll(".mobile-show-toggle")) {
+      const key = toggle.getAttribute("data-group");
+      const seasons = $("rows").querySelectorAll(
+        '.mobile-season-bubble[data-group="' + key + '"]'
+      );
+      const anyVisible = [...seasons].some((s) => !s.classList.contains("filtered-out"));
+      const tr = toggle.closest("tr.tv-parent");
+      if (tr) tr.classList.toggle("filtered-out", !anyVisible);
     }
     $("filter-bar-count").textContent =
       "Showing " + visible + " of " + state.items.length + " titles";
@@ -582,19 +721,21 @@ function releaseMain() {
     applyTypeFilter();
   }
 
-  // Desktop and mobile each render their own parent <tr> and their own
-  // season <tr>s (see parentRowHtml/seasonRowHtml) sharing the same
-  // data-group — expand state is computed from the row that was actually
-  // clicked, then applied to every row sharing that key so both copies (and
-  // every season/episode row underneath) stay in sync regardless of which
-  // one is currently visible.
+  // Desktop's tv-parent <tr> and mobile's .mobile-show-toggle div (see
+  // parentRowHtml/mobileGroupHtml above) share the same data-group — expand
+  // state is computed from whichever was actually clicked, then applied to
+  // both copies so they stay in sync regardless of which one is currently
+  // visible. The two copies differ in shape below the toggle itself: desktop
+  // reveals sibling tv-child <tr>s, mobile reveals its single nested
+  // .mobile-season-list div — each side is driven by its own loop instead of
+  // one shared selector.
   function onParentToggle(ev) {
     if (ev.target.closest("select")) return;
     const tr = ev.currentTarget;
     const key = tr.getAttribute("data-group");
     const expanded = !tr.classList.contains("expanded");
 
-    for (const parent of $("rows").querySelectorAll('tr.tv-parent[data-group="' + key + '"]')) {
+    for (const parent of $("rows").querySelectorAll('tr.tv-parent.wl-desktop-only[data-group="' + key + '"]')) {
       parent.classList.toggle("expanded", expanded);
       parent.classList.toggle("expanded-group", expanded);
       const indicator = parent.querySelector(".collapse-indicator");
@@ -618,6 +759,49 @@ function releaseMain() {
           }
         }
       }
+    }
+
+    for (const toggle of $("rows").querySelectorAll('.mobile-show-toggle[data-group="' + key + '"]')) {
+      toggle.classList.toggle("expanded", expanded);
+      const indicator = toggle.querySelector(".collapse-indicator");
+      if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+      const bubble = toggle.closest(".mobile-show-bubble");
+      if (bubble) bubble.classList.toggle("expanded", expanded);
+      const list = bubble && bubble.querySelector(".mobile-season-list");
+      if (list) list.classList.toggle("hide", !expanded);
+    }
+  }
+
+  // Season-level expand/collapse within a mobile show bubble (see
+  // mobileSeasonBubbleHtml above): toggles the nested .mobile-episode-bubble
+  // div, lazily loading its episode rows on first expand — mirrors
+  // onEpisodeToggleClick in shell.js, but targeting a div container instead
+  // of a sibling <tr class="episode-rows">, since this row has no siblings
+  // of its own to target (the whole show is one <tr>).
+  async function onMobileSeasonToggle(ev) {
+    if (ev.target.closest("select")) return;
+    const toggle = ev.currentTarget;
+    const bubble = toggle.closest(".mobile-season-bubble");
+    const itemId = bubble.getAttribute("data-id");
+    const episodeBubble = bubble.querySelector(
+      '.mobile-episode-bubble[data-mobile-episode-rows="' + itemId + '"]'
+    );
+    if (!episodeBubble) return;
+
+    const expanded = !bubble.classList.contains("expanded");
+    bubble.classList.toggle("expanded", expanded);
+    const indicator = toggle.querySelector(".collapse-indicator");
+    if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+    episodeBubble.classList.toggle("hide", !expanded);
+
+    if (!expanded) return;
+    if (episodeBubble.dataset.loaded) return;
+    episodeBubble.innerHTML = episodeLoadingHtml();
+    try {
+      await renderEpisodeRows(Number(itemId), episodeBubble, refreshSeasonProgress);
+      episodeBubble.dataset.loaded = "1";
+    } catch (e) {
+      episodeBubble.innerHTML = '<div class="episode-row muted">Could not load episodes.</div>';
     }
   }
 
@@ -677,7 +861,15 @@ function releaseMain() {
 
       if (state.signedIn) {
         const watch = await apiGet("/api/watch-status");
+        // /api/watch-status returns rows for every source (mcu and other),
+        // not just this page's — an other_universes item can carry the same
+        // numeric id as an MCU item (the two are independent id spaces), so
+        // without this filter an "other" row could silently overwrite an
+        // "mcu" row's status in this Map, or vice versa, keyed only by that
+        // shared bare id. This page only ever shows MCU items, so only mcu
+        // rows are relevant here.
         for (const row of (watch.data && watch.data.watch_status) || []) {
+          if ((row.source || "mcu") !== "mcu") continue;
           state.statuses.set(row.item_id, row.status);
         }
       }
