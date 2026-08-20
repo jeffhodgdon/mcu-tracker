@@ -174,22 +174,38 @@ function consolidatedMain() {
     for (const tr of $("rows").querySelectorAll("tr.group-row")) {
       tr.addEventListener("click", function () {
         const idx = tr.getAttribute("data-idx");
+        // Desktop and mobile each render their own group-row sharing this
+        // data-idx — compute the next state from whichever was clicked, then
+        // apply it to both copies (and every member/episode row under this
+        // franchise) so they stay in sync and the expanded-group highlight
+        // covers the whole block consistently.
+        const expanded = !tr.classList.contains("expanded-group");
+
+        for (const group of $("rows").querySelectorAll('tr.group-row[data-idx="' + idx + '"]')) {
+          group.classList.toggle("expanded-group", expanded);
+        }
+
         for (const detail of $("rows").querySelectorAll(
           'tr.detail-row[data-parent="' + idx + '"]'
         )) {
           if (detail.classList.contains("episode-rows")) {
-            // Its own episode-toggle button controls reveal; collapsing the
-            // franchise should only ever re-hide it, never show it on its own.
-            detail.classList.add("hide");
-            const itemId = detail.getAttribute("data-episode-rows");
-            const toggleBtn = $("rows").querySelector('[data-episode-toggle="' + itemId + '"]');
-            if (toggleBtn) {
-              toggleBtn.setAttribute("aria-expanded", "false");
-              toggleBtn.textContent = "▶";
+            detail.classList.toggle("expanded-group", expanded);
+            if (!expanded) {
+              // Its own episode-toggle button controls reveal; collapsing
+              // the franchise should only ever re-hide it, never show it on
+              // its own.
+              detail.classList.add("hide");
+              const itemId = detail.getAttribute("data-episode-rows");
+              const toggleBtn = $("rows").querySelector('[data-episode-toggle="' + itemId + '"]');
+              if (toggleBtn) {
+                toggleBtn.setAttribute("aria-expanded", "false");
+                toggleBtn.textContent = "▶";
+              }
             }
             continue;
           }
-          detail.classList.toggle("hide");
+          detail.classList.toggle("hide", !expanded);
+          detail.classList.toggle("expanded-group", expanded);
         }
       });
     }

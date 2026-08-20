@@ -278,6 +278,17 @@ tbody tr.section:hover td { background: var(--bg); }
   display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 99px;
   background: var(--card2); border: 1px solid var(--border); color: var(--muted);
   white-space: nowrap;
+  /* table td:first-child sets word-break:break-word (further down this file)
+     so long titles can wrap inside a narrow mobile row — that's inherited by
+     everything nested in the cell, badges included. word-break/overflow-wrap
+     can force a mid-word break even under white-space:nowrap when the box is
+     squeezed (a flex/grid child shrinking below content width), which is
+     what was splitting badge text like "TV Series" across lines. Overriding
+     both back to normal here is what actually stops it — white-space:nowrap
+     alone (already set above) does not, since it only governs where normal
+     line breaks may occur, not this forced break-to-fit behavior. */
+  word-break: normal;
+  overflow-wrap: normal;
 }
 .badge.est { border-color: #5a4413; color: var(--accent2); }
 .badge.count { border-color: #4a1f24; color: var(--accent); }
@@ -381,8 +392,15 @@ tbody tr.section:hover td { background: var(--bg); }
   /* Phase (release.js flat/season rows) sits next to the type badge on
      mobile line 2, grouped inside one wrapper so both share the badge's
      grid-column:1 slot instead of each trying to claim it separately (see
-     .wl-mobile-line2-left below, defined outside this media query). */
-  .rt-mobile-phase { color: var(--muted); font-size: 12px; }
+     .wl-mobile-line2-left below, defined outside this media query). Same
+     nowrap/word-break override as .badge above and for the same reason —
+     without it, values like "Phase 1" (or, for some seed rows, a long
+     literal string in the phase field) break mid-word once the flex row is
+     squeezed narrow. */
+  .rt-mobile-phase {
+    color: var(--muted); font-size: 12px;
+    white-space: nowrap; word-break: normal; overflow-wrap: normal;
+  }
 
   /* Small muted prefix distinguishing the mobile date column's meaning
      (Release Date vs in-universe Timeline) now that there's no dedicated
@@ -462,6 +480,18 @@ tbody tr.section:hover td { background: var(--bg); }
 }
 .wl-mobile-line2 .title {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Season child rows (release.js/chronological.js) get a 3rd mobile line for
+   the status dropdown instead of squeezing it into line 2's actions slot —
+   line 2 there is already carrying a type badge, a date, and (release.js
+   only) a phase label, which left too little room for a touch-sized select
+   without it wrapping/shrinking awkwardly. */
+.wl-mobile-line3 {
+  margin-top: 6px;
+}
+.wl-mobile-line3 select {
+  width: 100%;
 }
 
 /* Arrow left / title centered / runtime right, using the exact same
@@ -609,8 +639,21 @@ tr.episode-rows td { padding: 0; border-bottom: 1px solid var(--border); }
 .episode-num {
   font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text);
   flex: none; width: 30px;
+  /* Same inherited word-break:break-word from the enclosing td:first-child
+     (see .badge above) was letting short labels like "E01" split mid-string
+     inside this fixed 30px box — nowrap keeps it on one line even if that
+     means overflowing the box slightly, which reads better than a broken
+     episode number. */
+  white-space: nowrap;
 }
-.episode-title { flex: 1; color: var(--text); }
+.episode-title {
+  flex: 1; color: var(--text);
+  /* Explicit rather than relying on the inherited td:first-child value, so
+     this stays break-word (break only at a word boundary when the title
+     doesn't fit) and never regresses to break-all (breaking anywhere,
+     mid-word) if that ancestor rule ever changes. */
+  word-break: break-word;
+}
 .episode-runtime { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .episode-watch { flex: none; display: flex; align-items: center; cursor: pointer; }
 .episode-watch input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
@@ -618,4 +661,17 @@ tr.episode-rows td { padding: 0; border-bottom: 1px solid var(--border); }
 .badge.needs-review { border-color: #5a4413; color: var(--accent2); }
 
 .season-progress { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+/* Expanded show/franchise block (release.js, chronological.js,
+   consolidated.js): applied to the parent row, every season/member row
+   under it, and their episode-rows containers together while expanded, so
+   the whole block reads as one visually grouped unit instead of a flat run
+   of rows. Toggled in JS alongside the existing hide/expanded classes —
+   see onParentToggle / the group-row click handler in each page. Painted on
+   the <tr> itself (matching tbody tr:hover's own pattern below) since none
+   of these rows' <td>s set their own background, so it shows straight
+   through. */
+tr.expanded-group {
+  background: var(--card2);
+}
 `;

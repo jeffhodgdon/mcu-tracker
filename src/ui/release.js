@@ -403,9 +403,10 @@ function releaseMain() {
       " " +
       progressSpan +
       "</span>" +
-      '<span class="wl-mobile-line2-actions">' +
+      '<span class="wl-mobile-line2-actions"></span>' +
+      "</div>" +
+      '<div class="wl-mobile-line3">' +
       statusCell +
-      "</span>" +
       "</div>" +
       "</td>" +
       "</tr>";
@@ -581,21 +582,35 @@ function releaseMain() {
     applyTypeFilter();
   }
 
+  // Desktop and mobile each render their own parent <tr> and their own
+  // season <tr>s (see parentRowHtml/seasonRowHtml) sharing the same
+  // data-group — expand state is computed from the row that was actually
+  // clicked, then applied to every row sharing that key so both copies (and
+  // every season/episode row underneath) stay in sync regardless of which
+  // one is currently visible.
   function onParentToggle(ev) {
     if (ev.target.closest("select")) return;
     const tr = ev.currentTarget;
     const key = tr.getAttribute("data-group");
-    const expanded = tr.classList.toggle("expanded");
-    const indicator = tr.querySelector(".collapse-indicator");
-    if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+    const expanded = !tr.classList.contains("expanded");
 
-    for (const child of $("rows").querySelectorAll("tr.tv-child")) {
-      if (child.getAttribute("data-group") === key) {
-        child.classList.toggle("hide", !expanded);
+    for (const parent of $("rows").querySelectorAll('tr.tv-parent[data-group="' + key + '"]')) {
+      parent.classList.toggle("expanded", expanded);
+      parent.classList.toggle("expanded-group", expanded);
+      const indicator = parent.querySelector(".collapse-indicator");
+      if (indicator) indicator.textContent = expanded ? "▼" : "▶";
+    }
+
+    for (const child of $("rows").querySelectorAll('tr.tv-child[data-group="' + key + '"]')) {
+      child.classList.toggle("hide", !expanded);
+      child.classList.toggle("expanded-group", expanded);
+
+      const itemId = child.getAttribute("data-id");
+      const episodeRow = $("rows").querySelector('tr.episode-rows[data-episode-rows="' + itemId + '"]');
+      if (episodeRow) {
+        episodeRow.classList.toggle("expanded-group", expanded);
         if (!expanded) {
-          const itemId = child.getAttribute("data-id");
-          const episodeRow = $("rows").querySelector('tr.episode-rows[data-episode-rows="' + itemId + '"]');
-          if (episodeRow) episodeRow.classList.add("hide");
+          episodeRow.classList.add("hide");
           const toggleBtn = child.querySelector("[data-episode-toggle]");
           if (toggleBtn) {
             toggleBtn.setAttribute("aria-expanded", "false");
