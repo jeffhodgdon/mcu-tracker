@@ -551,35 +551,6 @@ tbody tr.section:hover td { background: var(--bg); }
   .wl-mobile-only { display: table-row; }
   .wl-mobile-only td { padding: 10px; }
 
-  /* Groups the season row and its expanded episode rows into one visually
-     bordered block. There's no wrapper element around the pair — mobileRow
-     and its episode-rows <tr> are plain siblings in the table (see
-     watchlistRowHtml in dashboard.js) — so the border is faked across the
-     two adjacent rows' <td>s instead of drawn on a container: the season
-     row's <td> gets top+left+right plus rounded top corners, and the
-     episode-rows <tr>'s <td> (only reachable via the preceding-sibling
-     combinator, since :has(+) can't select backwards) gets left+right+bottom
-     with rounded bottom corners. Drawing on the <td>s rather than the inner
-     line1/line2 divs keeps both halves flush at the same horizontal edge
-     (the divs sit 10px padding inset from the td, which would otherwise
-     misalign the shared side borders where the two rows meet). */
-  tr[data-key]:has(+ tr.episode-rows:not(.hide)) > td {
-    border-top: 1px solid var(--border);
-    border-left: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    background: #222640;
-  }
-  tr.episode-rows:not(.hide) > td {
-    border-left: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
-    background: #222640;
-  }
-
   /* Expanded franchise block (consolidated.js only — release.js/
      chronological.js use the real nested-<div> bubbles below instead, since
      their show/season/episode hierarchy needs true nesting, not adjacent
@@ -811,7 +782,7 @@ tr.episode-rows td { padding: 0; border-bottom: 1px solid var(--border); }
 
 .season-progress { color: var(--muted); font-size: 11px; white-space: nowrap; }
 
-/* Expanded show/franchise block (release.js, chronological.js,
+/* Expanded show/franchise block (dashboard.js, release.js, chronological.js,
    consolidated.js): applied to the parent row, every season/member row
    under it, and their episode-rows containers together while expanded, so
    the whole block reads as one visually grouped unit instead of a flat run
@@ -819,8 +790,68 @@ tr.episode-rows td { padding: 0; border-bottom: 1px solid var(--border); }
    see onParentToggle / the group-row click handler in each page. Painted on
    the <tr> itself (matching tbody tr:hover's own pattern below) since none
    of these rows' <td>s set their own background, so it shows straight
-   through. */
+   through.
+
+   Three-tier lightness hierarchy, applied at every width (not just mobile,
+   see the @media (max-width: 768px) block above for the equivalent mobile
+   rules) — show < season < episode ramp (#1e2235 < #242840 < #2a2f4a),
+   matching the mobile bubbles: tv-parent is the outermost show/group row,
+   tv-child is the nested season/item row, and episode-rows is the
+   innermost episode block. A row can only ever be one of these three (they
+   render as distinct sibling <tr>s, never combined classes), so ordering
+   between the rules below doesn't matter. */
 tr.expanded-group {
-  background: #222640;
+  background: #1e2235;
+}
+tr.tv-child.expanded-group {
+  background: #242840;
+}
+tr.episode-rows.expanded-group {
+  background: #2a2f4a;
+}
+/* Left/right edges of the grouped block, faked on each row's first/last
+   <td> the same way the mobile rules above do it — a top/bottom border
+   drawn on every row would stripe each one individually instead of reading
+   as one contained block, so only the outer sides get a border here and the
+   group's top/bottom edges are left to the existing row separators. */
+tr.expanded-group > td:first-child {
+  border-left: 1px solid var(--border);
+}
+tr.expanded-group > td:last-child {
+  border-right: 1px solid var(--border);
+}
+
+/* Dashboard watchlist TV rows (watchlistRowHtml in dashboard.js): unlike
+   release.js/chronological.js, a watchlisted season has no show-level parent
+   row above it — it's just the item's own row (desktopRow, then mobileRow,
+   then a shared episode-rows <tr>) with an episode-toggle arrow, so there's
+   no expanded-group class or show tier to key off. Only two tiers apply
+   here: the item row itself (season tier, #242840) and its episode-rows
+   (episode tier, #2a2f4a) — there's no #1e2235 show row in this markup.
+
+   Each item renders as an exact 3-row run — desktopRow, mobileRow,
+   episode-rows — so mobileRow can reach episode-rows with a plain
+   adjacent-sibling :has(+ ...), but desktopRow needs to skip over mobileRow
+   first. A general-sibling :has(~ ...) would also match a LATER, unrelated
+   item's expanded episode-rows (~ matches any following sibling, not just
+   the next one), lighting up every item above it once any one item's
+   episodes are open — so this instead skips exactly the one known
+   mobileRow in between, keeping the match scoped to this item's own row. */
+tr[data-key]:has(+ tr.wl-mobile-only + tr.episode-rows[data-episode-rows]:not(.hide)) > td,
+tr[data-key]:has(+ tr.episode-rows[data-episode-rows]:not(.hide)) > td {
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  background: #242840;
+}
+tr.episode-rows[data-episode-rows]:not(.hide) > td {
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  background: #2a2f4a;
 }
 `;

@@ -165,6 +165,10 @@ function dashboardMain() {
     watchlist: [],
     pickerChecked: new Set(),
     consolidatedGroups: [],
+    // Persists the Watched section's expand/collapse state across
+    // renderWatchlistTable() re-renders (e.g. after removing an item), so it
+    // only resets to collapsed on a fresh page load, not on every rebuild.
+    watchedGroupExpanded: false,
   };
 
   function $(id) {
@@ -707,6 +711,10 @@ function dashboardMain() {
     for (const line of $("watchlist-rows").querySelectorAll(".wl-mobile-line1-clickable")) {
       line.addEventListener("click", onWatchlistLine1Click);
     }
+
+    if (watched.length && state.watchedGroupExpanded) {
+      applyWatchedGroupState(true);
+    }
   }
 
   function onWatchlistLine1Click(ev) {
@@ -720,7 +728,15 @@ function dashboardMain() {
     if (ev.target.closest("select") || ev.target.closest("button")) return;
     const tr = ev.currentTarget;
     const expanded = !tr.classList.contains("expanded");
+    state.watchedGroupExpanded = expanded;
+    applyWatchedGroupState(expanded);
+  }
 
+  // Shared by onWatchedGroupToggle (a user click) and renderWatchlistTable
+  // (reapplying state.watchedGroupExpanded after a re-render, e.g. removing
+  // an item) so the Watched section's open/closed state survives rebuilds
+  // instead of always resetting to collapsed.
+  function applyWatchedGroupState(expanded) {
     // Desktop and mobile each render their own copy of this row (see
     // watchedGroupParentHtml above) sharing data-group="watched-parent" —
     // apply the new state to both so they stay in sync regardless of which
