@@ -132,7 +132,11 @@ function consolidatedMain() {
           '<tr class="detail-row hide wl-mobile-only"' +
           parentAttr +
           '>' +
-          '<td colspan="5" class="rt-mobile-indent">' +
+          '<td colspan="5" class="rt-mobile-indent' +
+          (isTv ? " wl-mobile-bubble-clickable" : "") +
+          '"' +
+          (isTv ? ' data-episode-toggle-target="' + item.id + '"' : "") +
+          '>' +
           '<div class="wl-mobile-line1">' +
           (isTv ? episodeToggleHtml(item.id) : "") +
           '<span class="title">' +
@@ -166,6 +170,87 @@ function consolidatedMain() {
       })
       .join("");
     return rows;
+  }
+
+  const episodeCache = new Map();
+
+  function readOnlyEpisodeRowHtml(ep) {
+    const numLabel = "E" + String(ep.episode_number).padStart(2, "0");
+    const title =
+      ep.title && !looksGeneric(ep.title, ep.episode_number)
+        ? ep.title
+        : "Episode " + String(ep.episode_number).padStart(2, "0");
+    const review = looksGeneric(ep.title, ep.episode_number) ? " " + needsReviewBadge() : "";
+    const estimate = ep.is_estimate
+      ? ' <span class="badge est" title="Runtime is an estimate">est</span>'
+      : "";
+
+    return (
+      '<div class="episode-row" data-episode-id="' +
+      ep.id +
+      '">' +
+      '<span class="episode-num">' +
+      numLabel +
+      "</span>" +
+      '<span class="episode-title">' +
+      esc(title) +
+      "</span>" +
+      review +
+      '<span class="episode-runtime">' +
+      (ep.runtime_min === null || ep.runtime_min === undefined ? "—" : formatRuntime(ep.runtime_min)) +
+      "</span>" +
+      estimate +
+      "</div>"
+    );
+  }
+
+  /** Read-only variant of shell.js's wireEpisodeToggles/onEpisodeToggleClick — no watch-status fetch, no checkboxes. */
+  function wireReadOnlyEpisodeToggles(container) {
+    for (const btn of container.querySelectorAll("[data-episode-toggle]")) {
+      btn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        onReadOnlyEpisodeToggleClick(btn, container);
+      });
+    }
+  }
+
+  async function onReadOnlyEpisodeToggleClick(btn, container) {
+    const itemId = btn.getAttribute("data-episode-toggle");
+    const row = container.querySelector('tr[data-episode-rows="' + itemId + '"]');
+    if (!row) return;
+
+    const expanded = btn.getAttribute("aria-expanded") === "true";
+    if (expanded) {
+      btn.setAttribute("aria-expanded", "false");
+      btn.textContent = "▶";
+      row.classList.add("hide");
+      return;
+    }
+
+    btn.setAttribute("aria-expanded", "true");
+    btn.textContent = "▼";
+    row.classList.remove("hide");
+
+    const cell = row.querySelector("td");
+    if (!cell.dataset.loaded) {
+      cell.innerHTML = episodeLoadingHtml();
+      try {
+        let episodes = episodeCache.get(itemId);
+        if (!episodes) {
+          const res = await apiGet("/api/items/" + itemId + "/episodes");
+          episodes = (res.data && res.data.episodes) || [];
+          episodeCache.set(itemId, episodes);
+        }
+        if (!episodes.length) {
+          cell.innerHTML = episodeNoDataHtml();
+        } else {
+          cell.innerHTML = episodes.map(readOnlyEpisodeRowHtml).join("");
+        }
+        cell.dataset.loaded = "1";
+      } catch (e) {
+        cell.innerHTML = '<div class="episode-row muted">Could not load episodes.</div>';
+      }
+    }
   }
 
   function render(groups) {
@@ -217,7 +302,24 @@ function consolidatedMain() {
       });
     }
 
-    wireEpisodeToggles($("rows"));
+    wireReadOnlyEpisodeToggles($("rows"));
+
+    // Mobile: the whole season bubble (line 1 and line 2 together, via the
+    // shared <td> that wraps both) is a tap target for TV season rows,
+    // mirroring the ▶ arrow's own expand/collapse — clicking the arrow
+    // itself already triggers it via wireEpisodeToggles above (and stops
+    // propagation there), so this only needs to act when some other part
+    // of the bubble was tapped.
+    for (const bubble of $("rows").querySelectorAll(".wl-mobile-bubble-clickable")) {
+      bubble.addEventListener("click", onSeasonBubbleClick);
+    }
+  }
+
+  function onSeasonBubbleClick(ev) {
+    if (ev.target.closest(".episode-toggle")) return;
+    const bubble = ev.currentTarget;
+    const toggle = bubble.querySelector(".episode-toggle");
+    if (toggle) toggle.click();
   }
 
   async function main() {

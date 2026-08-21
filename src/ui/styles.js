@@ -533,6 +533,10 @@ tbody tr.section:hover td { background: var(--bg); }
    handler bound and keep the default cursor. */
 .wl-mobile-line1-clickable { cursor: pointer; }
 
+/* Applied to a TV season row's whole <td> (see memberRows in consolidated.js)
+   so both line 1 and line 2 act as one tap target for expand/collapse. */
+.wl-mobile-bubble-clickable { cursor: pointer; }
+
 @media (max-width: 768px) {
   /* Column headers describe the desktop per-column layout, which the mobile
      row replaces entirely with self-explanatory div markup — so a single
@@ -590,14 +594,26 @@ tbody tr.section:hover td { background: var(--bg); }
     border-right: 1px solid var(--border);
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
+    background: #1e2235;
   }
+  /* Three-tier lightness hierarchy, matching release.js/chronological.js's
+     show < season < episode ramp (#1e2235 < #242840 < #2a2f4a) — faked across
+     adjacent <tr>s here instead of real nested <div>s, since consolidated.js
+     renders franchise/season/episode as sibling rows rather than a
+     franchise-owned container (see the comment above this block). */
   tr.wl-mobile-only.expanded-group.detail-row:not(.episode-rows) > td {
     border-left: 1px solid var(--border);
     border-right: 1px solid var(--border);
+    background: #242840;
   }
+  /* Every episode block gets its own bottom border (not just the last one
+     in the franchise, added further below) so it's clearly closed off before
+     the next season's row starts instead of visually bleeding into it. */
   tr.expanded-group.episode-rows:not(.hide) > td {
     border-left: 1px solid var(--border);
     border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: #2a2f4a;
   }
   /* Bottom edge of the block: the last visible row before the next
      group-row (or the end of the table) closes off the border. Episode rows
