@@ -776,6 +776,7 @@ export async function handleSubmitFeedback(request, env, user) {
   if (!Object.hasOwn(body, "message")) return error("message is required", 400);
   const message = String(body.message).trim();
   if (!message) return error("message must not be empty", 400);
+  if (message.length > 2000) return error("message must be 2000 characters or fewer", 400);
 
   let itemId = null;
   let itemTitle = null;
@@ -784,9 +785,19 @@ export async function handleSubmitFeedback(request, env, user) {
     if (!Number.isInteger(itemId) || itemId < 1) {
       return error("item_id must be a positive integer or null", 400);
     }
+    // item_id may point at either items.id or other_universes.id (the two
+    // id spaces are independent — see the source flag other.js/api.js use
+    // elsewhere), so a miss on items falls back to other_universes before
+    // treating the id as genuinely unknown.
     const item = await env.DB.prepare("SELECT title FROM items WHERE id = ?").bind(itemId).first();
-    if (!item) return error("No such item", 404);
-    itemTitle = item.title;
+    if (item) {
+      itemTitle = item.title;
+    } else {
+      const otherItem = await env.DB.prepare("SELECT title FROM other_universes WHERE id = ?")
+        .bind(itemId)
+        .first();
+      itemTitle = otherItem ? otherItem.title : "Unknown item";
+    }
   }
 
   await env.DB.prepare(

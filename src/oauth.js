@@ -10,7 +10,7 @@
  * signature would let anyone mint a token for any email address.
  */
 
-import { createSession, normalizeEmail, sessionCookie } from "./auth.js";
+import { createSession, deleteSessionsForUser, normalizeEmail, sessionCookie } from "./auth.js";
 // Every response here either issues or clears a credential cookie, so none of
 // them may be stored by any cache.
 import { PRIVATE_CACHE_CONTROL as PRIVATE_CACHE } from "./api.js";
@@ -275,6 +275,11 @@ export async function handleGoogleCallback(request, env, url, readCookie) {
   const email = normalizeEmail(claims.email);
   const userId = await findOrCreateUser(env, email);
 
+  // Every sign-in invalidates any session(s) already issued to this user
+  // (a stale browser tab, a previously stolen/leaked cookie, etc.) before
+  // minting a fresh one — session fixation protection on re-authentication,
+  // not just a fresh id for this one request.
+  await deleteSessionsForUser(env, userId);
   const sessionId = await createSession(env, userId);
 
   // Land on the root page so a browser test ends somewhere visible.

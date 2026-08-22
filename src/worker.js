@@ -58,35 +58,58 @@ function isAdmin(user) {
   return !!user && ADMIN_USER_IDS.includes(user.user_id);
 }
 
+/**
+ * Baseline hardening headers applied to every response this Worker returns,
+ * regardless of path or content type — added centrally here rather than in
+ * each individual handler so nothing can accidentally ship without them.
+ */
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  // Legacy browsers' built-in XSS filter is itself a known source of
+  // exploitable behavior (it can be used to disclose content via timing/
+  // filter side-channels), so modern guidance is to explicitly disable it
+  // rather than tune it — "0" turns it off outright.
+  "x-xss-protection": "0",
+};
+
+function withSecurityHeaders(response) {
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    response.headers.set(name, value);
+  }
+  return response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     try {
       if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
-        return await handleApi(request, env, ctx, url);
+        return withSecurityHeaders(await handleApi(request, env, ctx, url));
       }
 
       if (url.pathname === "/admin") {
         const user = await authenticate(request, env);
-        if (!user) return error("Authentication required", 401, { "cache-control": PRIVATE_CACHE_CONTROL });
-        if (!isAdmin(user)) return error("Forbidden", 403, { "cache-control": PRIVATE_CACHE_CONTROL });
-        return htmlResponse(adminPage());
+        if (!user) return withSecurityHeaders(error("Authentication required", 401, { "cache-control": PRIVATE_CACHE_CONTROL }));
+        if (!isAdmin(user)) return withSecurityHeaders(error("Forbidden", 403, { "cache-control": PRIVATE_CACHE_CONTROL }));
+        return withSecurityHeaders(htmlResponse(adminPage()));
       }
 
       const page = handlePage(url);
-      if (page) return page;
+      if (page) return withSecurityHeaders(page);
 
       // Kept as a plain-text probe now that / serves the UI.
-      if (url.pathname === "/health") return await health(request, env, url);
+      if (url.pathname === "/health") return withSecurityHeaders(await health(request, env, url));
 
-      return notFoundPage();
+      return withSecurityHeaders(notFoundPage());
     } catch (err) {
       if (err instanceof HttpError) {
-        return error(err.message, err.status);
+        return withSecurityHeaders(error(err.message, err.status));
       }
       console.error("unhandled error", err?.stack || String(err));
-      return error("Internal error", 500);
+      return withSecurityHeaders(error("Internal error", 500));
     }
   },
 };
@@ -218,6 +241,7 @@ async function handleApi(request, env, ctx, url) {
     if (method !== "GET") return methodNotAllowed("GET");
     if (!user) return unauthorized();
     const itemId = Number(url.searchParams.get("item_id"));
+    if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
     return handleGetWatchEpisodes(request, env, user, itemId);
   }
 
@@ -325,7 +349,11 @@ async function health(request, env, url) {
     const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM items").first();
     lines.push(`d1: OK (${row.n} items)`);
   } catch (err) {
-    lines.push(`d1: FAILED (${err.message})`);
+    // /health is public and unauthenticated — the raw driver error (schema
+    // hints, D1 error codes) is logged server-side only, never in the
+    // response body.
+    console.error("health check d1 query failed", err?.stack || String(err));
+    lines.push("d1: FAILED (Database unavailable)");
     return text(lines, 500);
   }
 

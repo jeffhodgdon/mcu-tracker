@@ -43,6 +43,16 @@ export async function deleteSession(env, sessionId) {
   await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run();
 }
 
+/**
+ * Invalidates every existing session for a user, e.g. right before minting a
+ * fresh one on sign-in — so a stale or leaked cookie from a previous session
+ * stops working the moment the user re-authenticates, rather than staying
+ * valid in parallel until it naturally expires.
+ */
+export async function deleteSessionsForUser(env, userId) {
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId).run();
+}
+
 /** Best-effort cleanup so the table does not grow without bound. */
 export async function purgeExpiredSessions(env) {
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
