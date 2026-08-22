@@ -30,3 +30,4 @@ Thumbs.db
 .continue/
 .continue/
 .continue/
+seed/dev-snapshot*.sql
