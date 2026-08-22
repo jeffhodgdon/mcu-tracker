@@ -15,7 +15,9 @@ import {
   handleAdminListItems,
   handleAdminPatchItem,
   handleAdminReplaceEpisodes,
+  handleClearWatchStatus,
   handleConsolidated,
+  handleDeleteAccount,
   handleDeleteWatchlistItem,
   handleGetItemEpisodes,
   handleGetSettings,
@@ -30,6 +32,8 @@ import {
   handlePostWatchlist,
   handlePutSettings,
   handlePutWatchStatus,
+  handleResetAllData,
+  handleSubmitFeedback,
   HttpError,
   PRIVATE_CACHE_CONTROL,
 } from "./api.js";
@@ -40,6 +44,7 @@ import { chronologicalPage } from "./ui/chronological.js";
 import { consolidatedPage } from "./ui/consolidated.js";
 import { otherPage } from "./ui/other.js";
 import { adminPage } from "./ui/admin.js";
+import { settingsPage } from "./ui/settings.js";
 import { htmlResponse } from "./ui/shell.js";
 
 /**
@@ -99,6 +104,7 @@ function handlePage(url) {
   if (path === "/chronological") return htmlResponse(chronologicalPage());
   if (path === "/consolidated") return htmlResponse(consolidatedPage());
   if (path === "/other") return htmlResponse(otherPage());
+  if (path === "/settings") return htmlResponse(settingsPage());
   // /admin is handled separately in fetch() — it needs an auth check before
   // rendering, unlike every other page here.
 
@@ -253,6 +259,30 @@ async function handleApi(request, env, ctx, url) {
     if (method === "GET") return handleGetSettings(request, env, user);
     if (method === "PUT") return handlePutSettings(request, env, user);
     return methodNotAllowed("GET, PUT");
+  }
+
+  if (pathname === "/api/settings/clear-watch-status") {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!user) return unauthorized();
+    return handleClearWatchStatus(request, env, user);
+  }
+
+  if (pathname === "/api/settings/reset-all") {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!user) return unauthorized();
+    return handleResetAllData(request, env, user);
+  }
+
+  if (pathname === "/api/settings/feedback") {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!user) return unauthorized();
+    return handleSubmitFeedback(request, env, user);
+  }
+
+  if (pathname === "/api/settings/delete-account") {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!user) return unauthorized();
+    return handleDeleteAccount(request, env, user);
   }
 
   return error("Not found", 404);

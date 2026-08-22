@@ -233,6 +233,16 @@ input[type="date"]:read-only {
 }
 .btn-primary:hover { filter: brightness(1.08); border-color: var(--accent); }
 
+/* Destructive actions (settings.js: Reset All Data, Delete My Data, and the
+   "Yes, continue"/"Delete permanently" step of their inline confirm rows) —
+   same accent red as .btn-primary but filled solid with no gradient, so it
+   reads distinctly as "danger" rather than the app's ordinary call-to-action
+   button. */
+.btn-danger {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+}
+.btn-danger:hover { filter: brightness(1.15); border-color: var(--accent); }
+
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
@@ -853,5 +863,89 @@ tr.episode-rows[data-episode-rows]:not(.hide) > td {
   border-bottom-left-radius: 8px;
   border-bottom-right-radius: 8px;
   background: #2a2f4a;
+}
+
+/* -------------------------------------------------------------- settings */
+
+/* Every section on /settings centers its content, matching .content-wrap's
+   h1/.sub and the .filter-bar card pattern used elsewhere (dashboard.js) —
+   scoped to #settings-body rather than bare .card/.admin-field-grid so
+   admin.js's own left-aligned form on /admin is unaffected. */
+#settings-body .card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+#settings-body h2 { text-align: center; }
+#settings-body p { text-align: center; }
+
+/* .card's flex column only centers each direct child as a unit — a <form>,
+   <label> or grid left at its own content width would otherwise shrink to
+   fit instead of the field itself filling and centering within the card, so
+   these get an explicit width to fill against before their own content
+   centers inside that width. */
+#settings-body form,
+#settings-body .admin-field-grid {
+  width: 100%;
+  max-width: 420px;
+}
+#settings-body label {
+  text-align: center;
+  align-items: center;
+  width: 100%;
+}
+#settings-body select,
+#settings-body textarea,
+#settings-body input[type="search"] {
+  text-align: center;
+}
+/* The centering rules above only stretch the <label> wrapper to full width —
+   select/textarea/input are inline-sized elements that otherwise shrink to
+   their own content (a <select> to its longest option, a <textarea> to the
+   browser's ~20-column default), which is what was leaving the feedback
+   form's Type/Item/Message fields as small centered boxes instead of filling
+   the card, especially at mobile widths where every other field on the page
+   is meant to read as full-width. Scoped to #feedback-form specifically
+   (not every #settings-body select/textarea/input) since the task calls out
+   the feedback fields, not the timezone selector above it, which keeps its
+   own deliberate max-width:360px. */
+#feedback-form select,
+#feedback-form textarea,
+#feedback-form input[type="search"] {
+  width: 100%;
+}
+/* The feedback item search results list reads better left-aligned (each
+   match is a distinct title, not a value to center under the input) —
+   overrides the input-level rule above for just the result buttons. */
+#settings-body .admin-picker-item {
+  text-align: left;
+}
+
+/* Row/button groups: center as a unit rather than left-justify within the
+   already-centered card. */
+#settings-body .row {
+  justify-content: center;
+}
+/* The How to Use toggle: same 1fr auto 1fr grid as .wl-mobile-line1 above
+   (arrow left / title centered / runtime right there) adapted to this
+   header's own two real elements plus one empty spacer column, so the
+   title centers in the button's remaining space while the arrow still sits
+   at the right edge rather than following the row-centering rule above. */
+#settings-body #howto-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+#settings-body #howto-toggle .howto-toggle-spacer {
+  grid-column: 1;
+}
+#settings-body #howto-toggle h2 {
+  grid-column: 2;
+  text-align: center;
+}
+#settings-body #howto-toggle #howto-arrow {
+  grid-column: 3;
+  justify-self: end;
 }
 `;

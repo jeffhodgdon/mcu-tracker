@@ -55,6 +55,9 @@ export const NAV = [
   { href: "/chronological", id: "chronological", label: "Chronological" },
   { href: "/consolidated", id: "consolidated", label: "Consolidated" },
   { href: "/other", id: "other", label: "Other Universes" },
+  // Visible to every signed-in user (unlike Admin below) — the settings page
+  // itself handles the signed-out case, same as other.js does.
+  { href: "/settings", id: "settings", label: "⚙ Settings" },
   { href: "/admin", id: "admin", label: "Admin", adminOnly: true },
 ];
 

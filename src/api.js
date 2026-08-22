@@ -17,6 +17,14 @@ import { consolidateItems } from "./consolidate.js";
 const WATCH_STATUSES = new Set(["unwatched", "watched", "want_rewatch", "skip"]);
 const WATCHLIST_SORTS = new Set(["release", "chronological"]);
 const SOURCES = new Set(["mcu", "other"]);
+const TIMEZONES = new Set([
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "UTC",
+]);
+const FEEDBACK_TYPES = new Set(["Wrong data", "Missing data", "Bug report", "Other"]);
 
 /**
  * True only for real calendar dates in YYYY-MM-DD form.
@@ -661,7 +669,7 @@ export async function handleGetStats(request, env) {
 
 export async function handleGetSettings(request, env, user) {
   const row = await env.DB.prepare(
-    "SELECT countdown_target_date, countdown_label, watchlist_sort FROM user_settings WHERE user_id = ?"
+    "SELECT countdown_target_date, countdown_label, watchlist_sort, timezone FROM user_settings WHERE user_id = ?"
   )
     .bind(user.user_id)
     .first();
@@ -671,6 +679,7 @@ export async function handleGetSettings(request, env, user) {
       countdown_target_date: row?.countdown_target_date ?? null,
       countdown_label: row?.countdown_label ?? null,
       watchlist_sort: row?.watchlist_sort ?? "release",
+      timezone: row?.timezone ?? "America/New_York",
     },
   });
 }
@@ -679,7 +688,7 @@ export async function handlePutSettings(request, env, user) {
   const body = await readJsonBody(request);
 
   const existing = await env.DB.prepare(
-    "SELECT countdown_target_date, countdown_label, watchlist_sort FROM user_settings WHERE user_id = ?"
+    "SELECT countdown_target_date, countdown_label, watchlist_sort, timezone FROM user_settings WHERE user_id = ?"
   )
     .bind(user.user_id)
     .first();
@@ -709,18 +718,100 @@ export async function handlePutSettings(request, env, user) {
     }
   }
 
+  const hasTimezone = Object.hasOwn(body, "timezone");
+  let timezone = hasTimezone ? "America/New_York" : existing?.timezone ?? "America/New_York";
+  if (hasTimezone && body.timezone !== null && body.timezone !== undefined) {
+    timezone = String(body.timezone);
+    if (!TIMEZONES.has(timezone)) {
+      return error(`timezone must be one of: ${[...TIMEZONES].join(", ")}`, 400);
+    }
+  }
+
   await env.DB.prepare(
-    `INSERT INTO user_settings (user_id, countdown_target_date, countdown_label, watchlist_sort)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO user_settings (user_id, countdown_target_date, countdown_label, watchlist_sort, timezone)
+     VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET
        countdown_target_date = excluded.countdown_target_date,
        countdown_label = excluded.countdown_label,
-       watchlist_sort = excluded.watchlist_sort`
+       watchlist_sort = excluded.watchlist_sort,
+       timezone = excluded.timezone`
   )
-    .bind(user.user_id, date, label, sort)
+    .bind(user.user_id, date, label, sort, timezone)
     .run();
 
   return privateJson({
-    settings: { countdown_target_date: date, countdown_label: label, watchlist_sort: sort },
+    settings: {
+      countdown_target_date: date,
+      countdown_label: label,
+      watchlist_sort: sort,
+      timezone,
+    },
   });
+}
+
+/* ------------------------------------------------------------ settings page */
+
+export async function handleClearWatchStatus(request, env, user) {
+  await env.DB.prepare("DELETE FROM watch_status WHERE user_id = ?").bind(user.user_id).run();
+  return privateJson({ ok: true });
+}
+
+export async function handleResetAllData(request, env, user) {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM watch_status WHERE user_id = ?").bind(user.user_id),
+    env.DB.prepare("DELETE FROM watchlist WHERE user_id = ?").bind(user.user_id),
+  ]);
+  return privateJson({ ok: true });
+}
+
+export async function handleSubmitFeedback(request, env, user) {
+  const body = await readJsonBody(request);
+
+  if (!Object.hasOwn(body, "type")) return error("type is required", 400);
+  const type = String(body.type);
+  if (!FEEDBACK_TYPES.has(type)) {
+    return error(`type must be one of: ${[...FEEDBACK_TYPES].join(", ")}`, 400);
+  }
+
+  if (!Object.hasOwn(body, "message")) return error("message is required", 400);
+  const message = String(body.message).trim();
+  if (!message) return error("message must not be empty", 400);
+
+  let itemId = null;
+  if (body.item_id !== null && body.item_id !== undefined && body.item_id !== "") {
+    itemId = Number(body.item_id);
+    if (!Number.isInteger(itemId) || itemId < 1) {
+      return error("item_id must be a positive integer or null", 400);
+    }
+    const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?").bind(itemId).first();
+    if (!exists) return error("No such item", 404);
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO feedback (user_id, type, item_id, message) VALUES (?, ?, ?, ?)"
+  )
+    .bind(user.user_id, type, itemId, message)
+    .run();
+
+  return privateJson({ ok: true });
+}
+
+/**
+ * Deletes every row this user owns, in dependency order (sessions/watch
+ * data before the users row itself), then clears their session cookie. The
+ * caller (worker.js) still needs the cookie cleared even though the session
+ * row backing it no longer exists — clearedSessionCookie() does that the
+ * same way handleLogout does.
+ */
+export async function handleDeleteAccount(request, env, user) {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM watch_status WHERE user_id = ?").bind(user.user_id),
+    env.DB.prepare("DELETE FROM watchlist WHERE user_id = ?").bind(user.user_id),
+    env.DB.prepare("DELETE FROM user_settings WHERE user_id = ?").bind(user.user_id),
+    env.DB.prepare("DELETE FROM feedback WHERE user_id = ?").bind(user.user_id),
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.user_id),
+    env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user.user_id),
+  ]);
+
+  return privateJson({ ok: true }, 200, { "set-cookie": clearedSessionCookie() });
 }
