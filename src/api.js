@@ -778,13 +778,15 @@ export async function handleSubmitFeedback(request, env, user) {
   if (!message) return error("message must not be empty", 400);
 
   let itemId = null;
+  let itemTitle = null;
   if (body.item_id !== null && body.item_id !== undefined && body.item_id !== "") {
     itemId = Number(body.item_id);
     if (!Number.isInteger(itemId) || itemId < 1) {
       return error("item_id must be a positive integer or null", 400);
     }
-    const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?").bind(itemId).first();
-    if (!exists) return error("No such item", 404);
+    const item = await env.DB.prepare("SELECT title FROM items WHERE id = ?").bind(itemId).first();
+    if (!item) return error("No such item", 404);
+    itemTitle = item.title;
   }
 
   await env.DB.prepare(
@@ -793,7 +795,39 @@ export async function handleSubmitFeedback(request, env, user) {
     .bind(user.user_id, type, itemId, message)
     .run();
 
+  await notifyFeedbackWebhook(env, { type, itemTitle, message, userId: user.user_id });
+
   return privateJson({ ok: true });
+}
+
+const FEEDBACK_WEBHOOK_URL = "https://n8n.kjserver.dev/webhook/mcu-tracker-feedback";
+
+/**
+ * Best-effort notification to n8n once feedback is already saved — the
+ * feedback row is the thing that matters, so a webhook outage (n8n down,
+ * network blip) must never fail the request or roll back the insert that
+ * already succeeded. Errors are logged for visibility and swallowed.
+ */
+async function notifyFeedbackWebhook(env, { type, itemTitle, message, userId }) {
+  try {
+    const userRow = await env.DB.prepare("SELECT email FROM users WHERE id = ?").bind(userId).first();
+
+    const res = await fetch(FEEDBACK_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type,
+        item_title: itemTitle ?? "None",
+        message,
+        user_email: userRow?.email ?? null,
+      }),
+    });
+    if (!res.ok) {
+      console.error("feedback webhook responded with", res.status);
+    }
+  } catch (err) {
+    console.error("feedback webhook failed", err?.stack || String(err));
+  }
 }
 
 /**
