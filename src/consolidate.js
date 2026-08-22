@@ -49,14 +49,16 @@ function stripLeadingThe(s) {
 }
 
 /**
- * Today's date as "YYYY-MM-DD" in America/New_York, consistent with the rest
- * of the app's Eastern-time date handling. Used to decide whether a member's
- * release_date is still in the future — a plain UTC "today" can be off by a
- * day right around midnight Eastern.
+ * Today's date as "YYYY-MM-DD" in the given IANA timezone. Used to decide
+ * whether a member's release_date is still in the future — a plain UTC
+ * "today" can be off by a day right around midnight in the caller's zone.
+ * Defaults to America/New_York (this app's original hardcoded zone) when no
+ * timezone is passed, matching handleConsolidated's fallback for
+ * unauthenticated/no-preference callers.
  */
-function todayEastern() {
+function todayInZone(tz) {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
+    timeZone: tz || "America/New_York",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -166,7 +168,7 @@ const GROUP_OVERRIDES = new Map([
   [85, "Captain Marvel"], // The Marvels
 ]);
 
-export function consolidateItems(items) {
+export function consolidateItems(items, timezone) {
   const allTitles = items.map((i) => i.title);
 
   const raw = items.map((item) => {
@@ -196,7 +198,7 @@ export function consolidateItems(items) {
     groups.get(key).members.push(r.item);
   }
 
-  const today = todayEastern();
+  const today = todayInZone(timezone);
 
   const out = [];
   for (const { displayBase, members } of groups.values()) {

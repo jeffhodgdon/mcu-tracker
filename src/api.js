@@ -7,12 +7,15 @@
  */
 
 import {
+  authenticate,
   deleteSession,
   readCookie,
   SESSION_COOKIE,
   clearedSessionCookie,
 } from "./auth.js";
 import { consolidateItems } from "./consolidate.js";
+
+const DEFAULT_TIMEZONE = "America/New_York";
 
 const WATCH_STATUSES = new Set(["unwatched", "watched", "want_rewatch", "skip"]);
 const WATCHLIST_SORTS = new Set(["release", "chronological"]);
@@ -146,7 +149,22 @@ export async function handleConsolidated(request, env) {
   ).all();
 
   const items = results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 }));
-  return json({ groups: consolidateItems(items) });
+
+  // /api/consolidated is deliberately public (no unauthorized() gate — see
+  // the module doc comment), so the caller may or may not be signed in;
+  // resolve the optional session here rather than requiring one, and fall
+  // back to the same default every unauthenticated caller gets.
+  const user = await authenticate(request, env);
+  const timezone = user ? await lookupUserTimezone(env, user.user_id) : DEFAULT_TIMEZONE;
+
+  return json({ groups: consolidateItems(items, timezone) });
+}
+
+async function lookupUserTimezone(env, userId) {
+  const row = await env.DB.prepare("SELECT timezone FROM user_settings WHERE user_id = ?")
+    .bind(userId)
+    .first();
+  return row?.timezone ?? DEFAULT_TIMEZONE;
 }
 
 /* ------------------------------------------------------------ other universes */

@@ -400,6 +400,18 @@ async function initSignedInLabel() {
     // rather than a single id — querySelectorAll keeps them in sync instead
     // of only ever updating whichever copy happened to match getElementById.
     const boxes = [...document.querySelectorAll(".whoami")];
+
+    if (me.signedIn) {
+      try {
+        const settings = await apiGet("/api/settings");
+        if (settings.data && settings.data.settings && settings.data.settings.timezone) {
+          window.userTimezone = settings.data.settings.timezone;
+        }
+      } catch (e) {
+        // Keep the America/New_York default set above if this fails.
+      }
+    }
+
     if (!boxes.length) return me;
     for (const box of boxes) {
       if (me.signedIn) {
@@ -653,8 +665,20 @@ const RUNTIME_FNS = [
 // loadEpisodeData/renderEpisodeRows/episodeMarkAll can all see the same Map.
 const EPISODE_CACHE_DECL = "var EPISODE_CACHE = new Map();";
 
+// A plain string, not a reflected function, for the same reason as
+// EPISODE_CACHE_DECL above — this assigns to the browser's own `window`,
+// which does not exist in the Worker's scope, so it must never appear as a
+// literal statement anywhere in shell.js's own module source (only inside
+// this serialized string does it ever actually run). initSignedInLabel
+// overwrites it once /api/settings resolves for a signed-in user; every page
+// reads it as `window.userTimezone || 'America/New_York'`, so the default
+// set here also covers a signed-out visitor or a failed settings fetch.
+const USER_TIMEZONE_DECL = "window.userTimezone = window.userTimezone || 'America/New_York';";
+
 const CLIENT_RUNTIME =
   EPISODE_CACHE_DECL +
+  "\n\n" +
+  USER_TIMEZONE_DECL +
   "\n\n" +
   normalizeNames(RUNTIME_FNS, RUNTIME_FNS.map((r) => r.src).join("\n\n"));
 

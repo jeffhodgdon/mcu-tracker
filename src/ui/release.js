@@ -505,13 +505,12 @@ function releaseMain() {
     );
   }
 
-  // Today's date as "YYYY-MM-DD" in America/New_York, consistent with the
-  // rest of the app's Eastern-time date handling — mirrors consolidate.js's
-  // todayEastern(), reimplemented here since this file runs in the browser
-  // bundle rather than the Worker.
-  function todayEastern() {
+  // Today's date as "YYYY-MM-DD" in the given IANA timezone — mirrors
+  // consolidate.js's todayInZone(), reimplemented here since this file runs
+  // in the browser bundle rather than the Worker.
+  function todayInZone(tz) {
     return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/New_York",
+      timeZone: tz,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -523,7 +522,7 @@ function releaseMain() {
   }
 
   function render() {
-    const today = todayEastern();
+    const today = todayInZone(window.userTimezone || "America/New_York");
 
     // Sorted on the raw string: catalogue dates are ISO-shaped, and partial
     // placeholders like 2027-07-00 land in the right slot this way. Undated
