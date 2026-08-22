@@ -31,3 +31,5 @@ Thumbs.db
 .continue/
 .continue/
 seed/dev-snapshot*.sql
+*.csv
+*.Zone.Identifier
