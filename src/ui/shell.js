@@ -418,7 +418,8 @@ async function initSignedInLabel() {
         box.innerHTML =
           '<div class="who">' +
           esc(me.data.user.email) +
-          '</div><button class="logout" style="margin-top:8px;padding:5px 9px;font-size:12px">Sign out</button>';
+          '</div><button class="logout" style="margin-top:8px;padding:5px 9px;font-size:12px">Sign out</button>' +
+          '<div style="margin-top:10px"><a class="kofi-support-link" href="https://ko-fi.com/kjserver" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--muted);text-decoration:none">♥ Support MCU Tracker</a></div>';
         const out = box.querySelector(".logout");
         out.addEventListener("click", async function () {
           await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });

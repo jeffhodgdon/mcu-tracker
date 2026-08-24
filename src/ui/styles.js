@@ -948,4 +948,5 @@ tr.episode-rows[data-episode-rows]:not(.hide) > td {
   grid-column: 3;
   justify-self: end;
 }
+#settings-body .settings-card { margin-top: 16px; }
 `;

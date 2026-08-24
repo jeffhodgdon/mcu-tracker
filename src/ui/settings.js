@@ -211,6 +211,13 @@ const BODY = `
     </p>
   </div>
 
+  <div class="settings-card" style="text-align:center">
+    <p style="margin:0 0 12px">If you enjoy MCU Tracker, consider supporting its development.</p>
+    <a href="https://ko-fi.com/kjserver" target="_blank" rel="noopener" class="btn" style="background:#323842;color:#fff;text-decoration:none;padding:10px 24px;border-radius:8px;display:inline-flex;align-items:center;gap:8px">
+      ☕ Support MCU Tracker on Ko-fi
+    </a>
+  </div>
+
 </div>
 `;
 
