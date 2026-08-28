@@ -697,6 +697,181 @@ export async function handleAdminListItems(request, env) {
   });
 }
 
+/**
+ * Makes room for a chrono_order value about to be written to `table` by
+ * shifting every existing row at that position and above up by 1 — so two
+ * rows never silently share a position. `excludeId` is the row being saved
+ * itself (edit path only; create has no id yet), since it will get the new
+ * value in the caller's own INSERT/UPDATE and must not also be caught by
+ * this shift.
+ */
+async function shiftChronoOrder(env, table, newOrder, excludeId) {
+  if (newOrder === null || newOrder === undefined) return;
+  const existing = await env.DB.prepare(
+    `SELECT 1 AS ok FROM ${table} WHERE chrono_order = ? AND id != ?`
+  )
+    .bind(newOrder, excludeId ?? -1)
+    .first();
+  if (!existing) return;
+
+  await env.DB.prepare(
+    `UPDATE ${table} SET chrono_order = chrono_order + 1 WHERE chrono_order >= ? AND id != ?`
+  )
+    .bind(newOrder, excludeId ?? -1)
+    .run();
+}
+
+/** Inserts a new MCU catalogue row. Required: title, type. Returns { id, title }. */
+export async function handleAdminCreateItem(request, env) {
+  const body = await readJsonBody(request);
+
+  if (!Object.hasOwn(body, "title") || String(body.title).trim() === "") {
+    return error("title is required", 400);
+  }
+  if (!Object.hasOwn(body, "type") || String(body.type).trim() === "") {
+    return error("type is required", 400);
+  }
+  const title = String(body.title).trim();
+  const type = String(body.type).trim();
+
+  const fields = Object.keys(body).filter((k) => ADMIN_ITEM_FIELDS.has(k) && k !== "title" && k !== "type");
+  const values = [];
+  for (const field of fields) {
+    let value = body[field];
+    if (field === "is_estimate") {
+      value = value ? 1 : 0;
+    } else if (field === "runtime_min" || field === "chrono_order") {
+      if (value !== null && value !== undefined) {
+        value = Number(value);
+        if (!Number.isFinite(value)) return error(`${field} must be a number or null`, 400);
+      } else {
+        value = null;
+      }
+    } else if (field === "release_date") {
+      if (value !== null && value !== undefined) {
+        value = String(value).trim();
+        if (!isCalendarDate(value) && !/^\d{4}-\d{2}(-00)?$/.test(value)) {
+          return error("release_date must be a YYYY-MM-DD date or null", 400);
+        }
+      } else {
+        value = null;
+      }
+    } else {
+      value = value === null || value === undefined ? null : String(value);
+    }
+    values.push(value);
+  }
+
+  const chronoOrderIdx = fields.indexOf("chrono_order");
+  if (chronoOrderIdx !== -1) {
+    await shiftChronoOrder(env, "items", values[chronoOrderIdx], null);
+  }
+
+  const columns = ["title", "type", ...fields];
+  const placeholders = columns.map(() => "?").join(", ");
+  const result = await env.DB.prepare(
+    `INSERT INTO items (${columns.join(", ")}) VALUES (${placeholders})`
+  )
+    .bind(title, type, ...values)
+    .run();
+
+  return privateJson({ id: result.meta.last_row_id, title }, 201);
+}
+
+/** Inserts a new Other Universes row. Required: title, universe. Returns { id, title }. */
+export async function handleAdminCreateOtherUniverse(request, env) {
+  const body = await readJsonBody(request);
+
+  if (!Object.hasOwn(body, "title") || String(body.title).trim() === "") {
+    return error("title is required", 400);
+  }
+  if (!Object.hasOwn(body, "universe") || String(body.universe).trim() === "") {
+    return error("universe is required", 400);
+  }
+  const title = String(body.title).trim();
+  const universe = String(body.universe).trim();
+
+  const fields = Object.keys(body).filter(
+    (k) => ADMIN_OTHER_FIELDS.has(k) && k !== "title" && k !== "universe"
+  );
+  const values = [];
+  for (const field of fields) {
+    let value = body[field];
+    if (field === "is_estimate") {
+      value = value ? 1 : 0;
+    } else if (field === "runtime_min" || field === "chrono_order") {
+      if (value !== null && value !== undefined) {
+        value = Number(value);
+        if (!Number.isFinite(value)) return error(`${field} must be a number or null`, 400);
+      } else {
+        value = null;
+      }
+    } else if (field === "release_date") {
+      if (value !== null && value !== undefined) {
+        value = String(value).trim();
+        if (!isCalendarDate(value) && !/^\d{4}-\d{2}(-00)?$/.test(value)) {
+          return error("release_date must be a YYYY-MM-DD date or null", 400);
+        }
+      } else {
+        value = null;
+      }
+    } else {
+      value = value === null || value === undefined ? null : String(value);
+    }
+    values.push(value);
+  }
+
+  const chronoOrderIdx = fields.indexOf("chrono_order");
+  if (chronoOrderIdx !== -1) {
+    await shiftChronoOrder(env, "other_universes", values[chronoOrderIdx], null);
+  }
+
+  const columns = ["title", "universe", ...fields];
+  const placeholders = columns.map(() => "?").join(", ");
+  const result = await env.DB.prepare(
+    `INSERT INTO other_universes (${columns.join(", ")}) VALUES (${placeholders})`
+  )
+    .bind(title, universe, ...values)
+    .run();
+
+  return privateJson({ id: result.meta.last_row_id, title }, 201);
+}
+
+/** Deletes an MCU item and every row that references it (watch_status, watchlist, episodes). */
+export async function handleAdminDeleteItem(request, env, itemId) {
+  if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
+
+  const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?").bind(itemId).first();
+  if (!exists) return error("No such item", 404);
+
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM watch_status WHERE item_id = ? AND source = 'mcu'").bind(itemId),
+    env.DB.prepare("DELETE FROM watchlist WHERE item_id = ? AND source = 'mcu'").bind(itemId),
+    env.DB.prepare("DELETE FROM episodes WHERE item_id = ?").bind(itemId),
+    env.DB.prepare("DELETE FROM items WHERE id = ?").bind(itemId),
+  ]);
+
+  return privateJson({ ok: true });
+}
+
+/** Deletes an Other Universes row and every row that references it (watch_status, watchlist). */
+export async function handleAdminDeleteOtherUniverse(request, env, itemId) {
+  if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
+
+  const exists = await env.DB.prepare("SELECT 1 AS ok FROM other_universes WHERE id = ?")
+    .bind(itemId)
+    .first();
+  if (!exists) return error("No such item", 404);
+
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM watch_status WHERE item_id = ? AND source = 'other'").bind(itemId),
+    env.DB.prepare("DELETE FROM watchlist WHERE item_id = ? AND source = 'other'").bind(itemId),
+    env.DB.prepare("DELETE FROM other_universes WHERE id = ?").bind(itemId),
+  ]);
+
+  return privateJson({ ok: true });
+}
+
 export async function handleAdminPatchItem(request, env, itemId, source) {
   if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
   if (!SOURCES.has(source)) {
@@ -713,7 +888,7 @@ export async function handleAdminPatchItem(request, env, itemId, source) {
     return error(`Provide at least one of: ${[...allowedFields].join(", ")}`, 400);
   }
 
-  const exists = await env.DB.prepare(`SELECT 1 AS ok FROM ${table} WHERE id = ?`)
+  const exists = await env.DB.prepare(`SELECT chrono_order FROM ${table} WHERE id = ?`)
     .bind(itemId)
     .first();
   if (!exists) return error("No such item", 404);
@@ -743,6 +918,14 @@ export async function handleAdminPatchItem(request, env, itemId, source) {
       value = value === null || value === undefined ? null : String(value);
     }
     values.push(value);
+  }
+
+  // Only shift when chrono_order is actually moving to a new value — saving
+  // the item unchanged (e.g. after an episode edit, see onEpisodeSave in
+  // admin.js) must not bump every row below it on every save.
+  const chronoOrderIdx = fields.indexOf("chrono_order");
+  if (chronoOrderIdx !== -1 && values[chronoOrderIdx] !== exists.chrono_order) {
+    await shiftChronoOrder(env, table, values[chronoOrderIdx], itemId);
   }
 
   const setClause = fields.map((f) => `${f} = ?`).join(", ");

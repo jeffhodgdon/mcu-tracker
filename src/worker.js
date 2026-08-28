@@ -12,6 +12,10 @@ import { authenticate, readCookie } from "./auth.js";
 import {
   error,
   handleAdminAudit,
+  handleAdminCreateItem,
+  handleAdminCreateOtherUniverse,
+  handleAdminDeleteItem,
+  handleAdminDeleteOtherUniverse,
   handleAdminListItems,
   handleAdminPatchItem,
   handleAdminReplaceEpisodes,
@@ -254,14 +258,33 @@ async function handleApi(request, env, ctx, url) {
     }
 
     if (pathname === "/api/admin/items") {
-      return method === "GET" ? handleAdminListItems(request, env) : methodNotAllowed("GET");
+      if (method === "GET") return handleAdminListItems(request, env);
+      if (method === "POST") return handleAdminCreateItem(request, env);
+      return methodNotAllowed("GET, POST");
+    }
+
+    if (pathname === "/api/admin/other-universes") {
+      return method === "POST"
+        ? handleAdminCreateOtherUniverse(request, env)
+        : methodNotAllowed("POST");
     }
 
     const itemMatch = /^\/api\/admin\/items\/(\d+)$/.exec(pathname);
     if (itemMatch) {
-      return method === "PATCH"
-        ? handleAdminPatchItem(request, env, Number(itemMatch[1]), url.searchParams.get("source") || "mcu")
-        : methodNotAllowed("PATCH");
+      if (method === "PATCH") {
+        return handleAdminPatchItem(request, env, Number(itemMatch[1]), url.searchParams.get("source") || "mcu");
+      }
+      if (method === "DELETE") {
+        return handleAdminDeleteItem(request, env, Number(itemMatch[1]));
+      }
+      return methodNotAllowed("PATCH, DELETE");
+    }
+
+    const otherUniverseMatch = /^\/api\/admin\/other-universes\/(\d+)$/.exec(pathname);
+    if (otherUniverseMatch) {
+      return method === "DELETE"
+        ? handleAdminDeleteOtherUniverse(request, env, Number(otherUniverseMatch[1]))
+        : methodNotAllowed("DELETE");
     }
 
     const episodesMatch = /^\/api\/admin\/episodes\/(\d+)$/.exec(pathname);

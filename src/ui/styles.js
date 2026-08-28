@@ -267,6 +267,9 @@ thead th {
   color: var(--muted); font-weight: 600;
   padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
+/* All Items tab headers (admin.js): CHRONO<br>ORDER needs its <br> to
+   actually break the line, which nowrap above would otherwise suppress. */
+#tab-all thead th { white-space: normal; }
 tbody td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tbody tr:hover { background: var(--card2); }
 tbody tr.watched .title { color: var(--muted); text-decoration: line-through; }
@@ -732,6 +735,45 @@ tbody tr.section:hover td { background: var(--bg); }
 .admin-field-grid label.switch { flex-direction: row; align-items: center; }
 @media (max-width: 620px) {
   .admin-field-grid { grid-template-columns: 1fr; }
+}
+
+/* All Items tab: Title/Type/Release/Phase/Runtime/Est./Chrono/Edit/Delete is
+   more columns than the page's 960px .content-wrap comfortably fits at once.
+   This card used to set overflow:hidden inline (matching every other
+   catalogue table), which was clipping the last column — Delete — off the
+   right edge; admin.js now leaves that off this one card so overflow-x:auto
+   here can take effect, letting wide content scroll horizontally within the
+   card instead of being cut off. */
+#tab-all .card {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* The Delete <td>/<th> had no width floor of their own (unlike Edit's inline
+   width:70px) — under table-layout:auto the browser sizes unconstrained
+   columns from their content, and a bare "✕" button was consistently losing
+   that negotiation to its neighbors and getting squeezed to a sliver (or
+   effectively 0) once the table ran out of room, well before .card's
+   overflow-x:auto had anything to scroll to reach it. width+min-width pins
+   it to a floor it can never shrink below, matching Edit's own fixed column. */
+.admin-delete-head,
+.admin-delete-cell {
+  width: 36px;
+  min-width: 36px;
+}
+/* min-width keeps every column (Edit and Delete included) at a readable
+   width rather than being squeezed below the .card's own width once it's
+   allowed to scroll — but only above the 720px breakpoint where .opt columns
+   (Type/Phase/Runtime/Est./Chrono) are still shown. Below it those columns
+   are hidden entirely (see the max-width:720px block above) and the
+   remaining Title/Release/Edit/Delete columns already fit without forcing a
+   scrollbar, so a fixed min-width there would make a narrow phone screen
+   scroll horizontally for no reason. Chrono order now wraps to two lines and
+   Delete shrank to a bare 36px "✕" column, freeing up enough width that this
+   no longer needs to reserve as much room as before. */
+@media (min-width: 721px) {
+  #tab-all table {
+    min-width: 760px;
+  }
 }
 
 .admin-clickable-row { cursor: pointer; }

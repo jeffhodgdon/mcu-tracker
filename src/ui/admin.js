@@ -16,6 +16,7 @@ const BODY = `
     <button type="button" class="tab-btn" data-tab="issues" aria-pressed="true">Data Issues</button>
     <button type="button" class="tab-btn" data-tab="edit" aria-pressed="false">Edit Item</button>
     <button type="button" class="tab-btn" data-tab="all" aria-pressed="false">All Items</button>
+    <button type="button" class="tab-btn" data-tab="add" aria-pressed="false">Add Item</button>
   </div>
 </div>
 
@@ -78,6 +79,10 @@ const BODY = `
         <span id="edit-feedback"></span>
       </div>
     </form>
+
+    <div class="row" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px" id="delete-item-action">
+      <button type="button" id="delete-item-btn" class="btn-danger">Delete Item</button>
+    </div>
   </div>
 
   <div class="card hide" id="episodes-card" style="margin-top:16px">
@@ -105,7 +110,7 @@ const BODY = `
 </div>
 
 <div id="tab-all" class="tab-panel hide">
-  <div class="card" style="padding:0;overflow:hidden">
+  <div class="card" style="padding:0">
     <table>
       <thead>
         <tr>
@@ -115,14 +120,78 @@ const BODY = `
           <th class="opt" style="text-align:center">Phase</th>
           <th class="num opt" style="text-align:center">Runtime</th>
           <th class="opt" style="text-align:center">Est.</th>
-          <th class="num opt" style="text-align:center">Chrono order</th>
+          <th class="num opt" style="text-align:center">CHRONO<br>ORDER</th>
           <th style="width:70px;text-align:center">Edit</th>
+          <th class="admin-delete-head" style="width:36px;text-align:center">✕</th>
         </tr>
       </thead>
       <tbody id="all-rows">
-        <tr><td colspan="8" class="muted" style="padding:18px">Loading…</td></tr>
+        <tr><td colspan="9" class="muted" style="padding:18px">Loading…</td></tr>
       </tbody>
     </table>
+  </div>
+</div>
+
+<div id="tab-add" class="tab-panel hide">
+  <div class="card">
+    <div class="admin-field-grid">
+      <label>Source
+        <select id="add-source">
+          <option value="mcu">MCU Item</option>
+          <option value="other">Other Universe</option>
+        </select>
+      </label>
+    </div>
+
+    <form id="add-form" style="margin-top:14px">
+      <div class="admin-field-grid">
+        <label>Title
+          <input type="text" id="add-title" required>
+        </label>
+        <label id="add-type-label">Type
+          <select id="add-type">
+            <option>Film</option>
+            <option>TV Series</option>
+            <option>One-Shot</option>
+            <option>Special Presentation</option>
+            <option>Marvel Television</option>
+            <option>Animated Series</option>
+          </select>
+        </label>
+        <label id="add-universe-label" class="hide">Universe
+          <input type="text" id="add-universe">
+        </label>
+        <label>Release date
+          <input type="text" id="add-release-date" placeholder="YYYY-MM-DD">
+        </label>
+        <label id="add-phase-label">Phase
+          <input type="text" id="add-phase">
+        </label>
+        <label id="add-setting-label" class="hide">Setting
+          <input type="text" id="add-setting">
+        </label>
+        <label id="add-crossover-label">Crossover universe
+          <input type="text" id="add-crossover-universe" placeholder="Blank = MCU only">
+        </label>
+        <label id="add-notes-label" class="hide">Notes
+          <input type="text" id="add-notes">
+        </label>
+        <label id="add-runtime-label">Runtime (min)
+          <input type="text" id="add-runtime" placeholder="e.g. 143">
+        </label>
+        <label>Chrono order
+          <input type="text" id="add-chrono-order" placeholder="e.g. 12">
+        </label>
+        <label class="switch" style="margin-top:22px">
+          <input type="checkbox" id="add-is-estimate">
+          Runtime is an estimate
+        </label>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button type="submit" class="btn-primary">Add item</button>
+        <span id="add-feedback"></span>
+      </div>
+    </form>
   </div>
 </div>
 `;
@@ -643,6 +712,164 @@ function adminMain() {
     return res.json();
   }
 
+  function onAddSourceChange() {
+    const isOther = $("add-source").value === "other";
+    $("add-type-label").classList.toggle("hide", isOther);
+    $("add-universe-label").classList.toggle("hide", !isOther);
+    $("add-phase-label").classList.toggle("hide", isOther);
+    $("add-setting-label").classList.toggle("hide", !isOther);
+    $("add-crossover-label").classList.toggle("hide", isOther);
+    $("add-notes-label").classList.toggle("hide", !isOther);
+  }
+
+  async function apiPostJson(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = res.status;
+      try {
+        detail = (await res.json()).error || detail;
+      } catch (e) {}
+      throw new Error(String(detail));
+    }
+    return res.json();
+  }
+
+  function resetAddForm() {
+    $("add-form").reset();
+    $("add-source").value = "mcu";
+    onAddSourceChange();
+  }
+
+  async function onAddFormSubmit(ev) {
+    ev.preventDefault();
+    const isOther = $("add-source").value === "other";
+
+    const title = $("add-title").value.trim();
+    if (!title) {
+      $("add-feedback").textContent = "Title is required.";
+      $("add-feedback").style.color = "#ffb4b4";
+      return;
+    }
+
+    const body = isOther
+      ? {
+          title,
+          universe: $("add-universe").value.trim(),
+          release_date: $("add-release-date").value.trim() || null,
+          setting: $("add-setting").value.trim() || null,
+          notes: $("add-notes").value.trim() || null,
+          runtime_min: $("add-runtime").value.trim() === "" ? null : Number($("add-runtime").value.trim()),
+          chrono_order:
+            $("add-chrono-order").value.trim() === "" ? null : Number($("add-chrono-order").value.trim()),
+          is_estimate: $("add-is-estimate").checked,
+        }
+      : {
+          title,
+          type: $("add-type").value,
+          release_date: $("add-release-date").value.trim() || null,
+          phase: $("add-phase").value.trim() || null,
+          runtime_min: $("add-runtime").value.trim() === "" ? null : Number($("add-runtime").value.trim()),
+          chrono_order:
+            $("add-chrono-order").value.trim() === "" ? null : Number($("add-chrono-order").value.trim()),
+          is_estimate: $("add-is-estimate").checked,
+          crossover_universe: $("add-crossover-universe").value.trim() || null,
+        };
+
+    if (isOther && !body.universe) {
+      $("add-feedback").textContent = "Universe is required.";
+      $("add-feedback").style.color = "#ffb4b4";
+      return;
+    }
+
+    const feedback = $("add-feedback");
+    const btn = ev.target.querySelector("button[type=submit]");
+    btn.disabled = true;
+    feedback.textContent = "Saving…";
+    feedback.style.color = "";
+    try {
+      const res = await apiPostJson(
+        isOther ? "/api/admin/other-universes" : "/api/admin/items",
+        body
+      );
+      feedback.innerHTML =
+        "Added \"" +
+        esc(res.title) +
+        '" (id ' +
+        res.id +
+        '). <a href="#" id="add-edit-link">Edit it</a>';
+      feedback.style.color = "var(--done)";
+
+      const source = isOther ? "other" : "mcu";
+      $("add-edit-link").addEventListener("click", function (linkEv) {
+        linkEv.preventDefault();
+        setTab("edit");
+        loadItems().then(function () {
+          const item = findItem(res.id, source);
+          if (item) openEditor(item);
+        });
+      });
+
+      resetAddForm();
+      await loadItems();
+    } catch (e) {
+      feedback.textContent = "Error: " + e.message;
+      feedback.style.color = "#ffb4b4";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /**
+   * Same inline "Are you sure?" swap settings.js's wireConfirmAction uses for
+   * its bulk actions (Reset All Data etc) — a fixed single container/button
+   * pair, unlike wireRowDeleteCell's per-row version, since there is only
+   * ever one item open in the editor at a time.
+   */
+  function wireDeleteItemButton() {
+    const container = $("delete-item-action");
+    const btn = $("delete-item-btn");
+    const originalHtml = container.innerHTML;
+
+    btn.addEventListener("click", function () {
+      container.innerHTML =
+        '<div class="row" style="gap:8px;flex-wrap:wrap">' +
+        '<span style="font-size:13px">Delete this item permanently? This cannot be undone.</span>' +
+        '<button type="button" class="btn-danger" data-confirm-yes>Yes, delete</button>' +
+        '<button type="button" data-confirm-no>Cancel</button>' +
+        "</div>";
+
+      container.querySelector("[data-confirm-no]").addEventListener("click", function () {
+        container.innerHTML = originalHtml;
+        wireDeleteItemButton();
+      });
+
+      container.querySelector("[data-confirm-yes]").addEventListener("click", async function (ev) {
+        if (!state.editingId) return;
+        const yesBtn = ev.currentTarget;
+        yesBtn.disabled = true;
+        yesBtn.textContent = "Deleting…";
+        try {
+          const deletedTitle = $("f-title").value;
+          await deleteItem(state.editingId, state.editingSource);
+          $("edit-form").classList.add("hide");
+          state.editingId = null;
+          showAdminSuccess(esc(deletedTitle) + " deleted.");
+          await loadItems();
+        } catch (e) {
+          showError("Could not delete: " + e.message);
+        } finally {
+          container.innerHTML = originalHtml;
+          wireDeleteItemButton();
+        }
+      });
+    });
+  }
+
   function otherSourceBadgeHtml() {
     return ' <span class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.4px">Other</span>';
   }
@@ -675,7 +902,94 @@ function adminMain() {
       (item.chrono_order === null || item.chrono_order === undefined ? "—" : item.chrono_order) +
       '</td><td><button type="button" class="admin-edit-btn" data-id="' +
       item.id +
-      '">Edit</button></td></tr>'
+      '">Edit</button></td>' +
+      '<td class="admin-delete-cell" data-id="' +
+      item.id +
+      '" data-source="' +
+      esc(item.source || "mcu") +
+      '">' +
+      deleteCellButtonHtml() +
+      "</td></tr>"
+    );
+  }
+
+  function deleteCellButtonHtml() {
+    return (
+      '<button type="button" class="admin-row-delete-btn" aria-label="Delete item" title="Delete item" ' +
+      'style="background:none;border:none;cursor:pointer;font-size:14px;color:#ff8a8a">✕</button>'
+    );
+  }
+
+  /**
+   * Inline "Are you sure?" swap for one All Items row's Delete cell — same
+   * confirm-without-confirm() pattern settings.js's wireConfirmAction uses
+   * for its bulk actions, adapted to a per-row cell instead of a single
+   * fixed container since every row needs its own independent confirm state.
+   */
+  function wireRowDeleteCell(cell) {
+    const btn = cell.querySelector(".admin-row-delete-btn");
+    if (!btn) return;
+
+    btn.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      cell.innerHTML =
+        '<div class="row" style="gap:4px;flex-wrap:nowrap;justify-content:center">' +
+        '<button type="button" class="btn-danger" data-confirm-yes style="padding:4px 8px;font-size:12px">Yes</button>' +
+        '<button type="button" data-confirm-no style="padding:4px 8px;font-size:12px">No</button>' +
+        "</div>";
+
+      cell.querySelector("[data-confirm-no]").addEventListener("click", function (noEv) {
+        noEv.stopPropagation();
+        cell.innerHTML = deleteCellButtonHtml();
+        wireRowDeleteCell(cell);
+      });
+
+      cell.querySelector("[data-confirm-yes]").addEventListener("click", async function (yesEv) {
+        yesEv.stopPropagation();
+        const yesBtn = yesEv.currentTarget;
+        yesBtn.disabled = true;
+        const id = Number(cell.getAttribute("data-id"));
+        const source = cell.getAttribute("data-source") || "mcu";
+        try {
+          await deleteItem(id, source);
+          showAdminSuccess(esc(findItem(id, source) && findItem(id, source).title) + " deleted.");
+          await loadItems();
+        } catch (e) {
+          showError("Could not delete: " + e.message);
+          cell.innerHTML = deleteCellButtonHtml();
+          wireRowDeleteCell(cell);
+        }
+      });
+    });
+  }
+
+  function showAdminSuccess(message) {
+    const note = document.createElement("div");
+    note.className = "stat-note";
+    note.style.color = "var(--done)";
+    note.style.textAlign = "center";
+    note.textContent = message;
+    $("subtitle").insertAdjacentElement("afterend", note);
+    setTimeout(function () {
+      note.remove();
+    }, 4000);
+  }
+
+  async function apiDeleteJson(path) {
+    const res = await fetch(path, { method: "DELETE", credentials: "same-origin" });
+    if (!res.ok) {
+      let detail = res.status;
+      try {
+        detail = (await res.json()).error || detail;
+      } catch (e) {}
+      throw new Error(String(detail));
+    }
+    return res.json();
+  }
+
+  function deleteItem(id, source) {
+    return apiDeleteJson(
+      source === "other" ? "/api/admin/other-universes/" + id : "/api/admin/items/" + id
     );
   }
 
@@ -697,6 +1011,9 @@ function adminMain() {
         const item = findItem(Number(row.getAttribute("data-id")), row.getAttribute("data-source"));
         if (item) openEditor(item);
       });
+    }
+    for (const cell of $("all-rows").querySelectorAll(".admin-delete-cell")) {
+      wireRowDeleteCell(cell);
     }
   }
 
@@ -724,7 +1041,7 @@ function adminMain() {
       renderAllRows();
     } catch (e) {
       $("all-rows").innerHTML =
-        '<tr><td colspan="8" class="muted" style="padding:18px">Could not load items.</td></tr>';
+        '<tr><td colspan="9" class="muted" style="padding:18px">Could not load items.</td></tr>';
       showError(e.message);
     }
   }
@@ -756,6 +1073,12 @@ function adminMain() {
     $("f-is-estimate").addEventListener("change", function (ev) {
       if (!$("episodes-card").classList.contains("hide")) onSeasonEstimateChange(ev);
     });
+
+    $("add-source").addEventListener("change", onAddSourceChange);
+    $("add-form").addEventListener("submit", onAddFormSubmit);
+    onAddSourceChange();
+
+    wireDeleteItemButton();
 
     await loadItems();
     await loadAudit();
