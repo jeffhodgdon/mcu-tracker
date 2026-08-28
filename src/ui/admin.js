@@ -37,7 +37,7 @@ const BODY = `
         <label>Title
           <input type="text" id="f-title" required>
         </label>
-        <label>Type
+        <label id="f-type-label">Type
           <select id="f-type">
             <option>Film</option>
             <option>TV Series</option>
@@ -47,11 +47,20 @@ const BODY = `
             <option>Animated Series</option>
           </select>
         </label>
+        <label id="f-universe-label" class="hide">Universe
+          <input type="text" id="f-universe">
+        </label>
         <label>Release date
           <input type="text" id="f-release-date" placeholder="YYYY-MM-DD">
         </label>
-        <label>Phase
+        <label id="f-phase-label">Phase
           <input type="text" id="f-phase">
+        </label>
+        <label id="f-setting-label" class="hide">Setting
+          <input type="text" id="f-setting">
+        </label>
+        <label id="f-crossover-label">Crossover universe
+          <input type="text" id="f-crossover-universe" placeholder="Blank = MCU only">
         </label>
         <label id="f-runtime-label">Runtime (min)
           <input type="text" id="f-runtime" placeholder="e.g. 143">
@@ -128,7 +137,13 @@ function adminMain() {
   // *Main() function for the same reason.
   const ADMIN_TV_TYPES = ["TV Series", "Marvel Television", "Animated Series"];
 
-  const state = { items: [], allSort: { key: "title", dir: 1 }, editingId: null, episodes: [] };
+  const state = {
+    items: [],
+    allSort: { key: "title", dir: 1 },
+    editingId: null,
+    editingSource: "mcu",
+    episodes: [],
+  };
 
   function $(id) {
     return document.getElementById(id);
@@ -144,12 +159,17 @@ function adminMain() {
   }
 
   function auditRowHtml(item, valueLabel) {
+    const isOther = item.source === "other";
     return (
       '<tr class="admin-clickable-row" data-id="' +
       item.id +
+      '" data-source="' +
+      esc(item.source || "mcu") +
       '"><td><span class="title">' +
       esc(item.title) +
-      "</span></td><td class=\"opt\"><span class=\"badge\" data-type=\"" +
+      "</span>" +
+      (isOther ? otherSourceBadgeHtml() : "") +
+      "</td><td class=\"opt\"><span class=\"badge\" data-type=\"" +
       esc(item.type) +
       "\">" +
       esc(item.type) +
@@ -251,7 +271,7 @@ function adminMain() {
 
       for (const row of $("audit-sections").querySelectorAll(".admin-clickable-row")) {
         row.addEventListener("click", function () {
-          const item = state.items.find((i) => i.id === Number(row.getAttribute("data-id")));
+          const item = findItem(Number(row.getAttribute("data-id")), row.getAttribute("data-source"));
           if (item) openEditor(item);
         });
       }
@@ -263,10 +283,11 @@ function adminMain() {
 
   function populateForm(item) {
     state.editingId = item.id;
+    state.editingSource = item.source || "mcu";
+    const isOther = state.editingSource === "other";
+
     $("f-title").value = item.title || "";
-    $("f-type").value = item.type || "Film";
     $("f-release-date").value = item.release_date || "";
-    $("f-phase").value = item.phase || "";
     $("f-runtime").value = item.runtime_min === null || item.runtime_min === undefined ? "" : item.runtime_min;
     $("f-chrono-order").value =
       item.chrono_order === null || item.chrono_order === undefined ? "" : item.chrono_order;
@@ -275,7 +296,25 @@ function adminMain() {
     $("edit-feedback").className = "";
     $("edit-form").classList.remove("hide");
 
-    const isTv = ADMIN_TV_TYPES.indexOf(item.type) !== -1;
+    // Other Universes items have no type/phase (browse-only reference table
+    // — see the other_universes migration) and use universe/setting instead,
+    // so the form swaps which fields are visible rather than showing both
+    // sets at once.
+    $("f-type-label").classList.toggle("hide", isOther);
+    $("f-universe-label").classList.toggle("hide", !isOther);
+    $("f-phase-label").classList.toggle("hide", isOther);
+    $("f-setting-label").classList.toggle("hide", !isOther);
+    $("f-crossover-label").classList.toggle("hide", isOther);
+    $("f-type").value = item.type || "Film";
+    $("f-universe").value = item.universe || "";
+    $("f-phase").value = item.phase || "";
+    $("f-setting").value = item.setting || "";
+    $("f-crossover-universe").value = item.crossover_universe || "";
+
+    // Other Universes has no TV/episode tracking (browse-only, see the
+    // other_universes migration doc comment) — never show the Episodes card
+    // for it, regardless of type.
+    const isTv = !isOther && ADMIN_TV_TYPES.indexOf(item.type) !== -1;
     $("episodes-card").classList.toggle("hide", !isTv);
     $("f-runtime").readOnly = isTv;
     // Only the label's own leading text node is replaced here — using
@@ -505,15 +544,18 @@ function adminMain() {
         (i) =>
           '<button type="button" class="admin-picker-item" data-id="' +
           i.id +
+          '" data-source="' +
+          esc(i.source || "mcu") +
           '">' +
           esc(i.title) +
+          (i.source === "other" ? otherSourceBadgeHtml() : "") +
           "</button>"
       )
       .join("");
     box.classList.toggle("hide", matches.length === 0);
     for (const btn of box.querySelectorAll("[data-id]")) {
       btn.addEventListener("click", function () {
-        const item = state.items.find((i) => i.id === Number(btn.getAttribute("data-id")));
+        const item = findItem(Number(btn.getAttribute("data-id")), btn.getAttribute("data-source"));
         if (item) {
           $("item-picker").value = item.title;
           box.classList.add("hide");
@@ -527,19 +569,33 @@ function adminMain() {
     ev.preventDefault();
     if (!state.editingId) return;
 
+    const isOther = state.editingSource === "other";
+
     // For TV items f-runtime/f-is-estimate are read-only and kept in sync
     // with the episode rows by updateComputedRuntime(), so reading them here
     // (rather than recomputing) is exactly "send the computed values".
-    const body = {
-      title: $("f-title").value.trim(),
-      type: $("f-type").value,
-      release_date: $("f-release-date").value.trim() || null,
-      phase: $("f-phase").value.trim() || null,
-      runtime_min: $("f-runtime").value.trim() === "" ? null : Number($("f-runtime").value.trim()),
-      chrono_order:
-        $("f-chrono-order").value.trim() === "" ? null : Number($("f-chrono-order").value.trim()),
-      is_estimate: $("f-is-estimate").checked,
-    };
+    const body = isOther
+      ? {
+          title: $("f-title").value.trim(),
+          universe: $("f-universe").value.trim(),
+          release_date: $("f-release-date").value.trim() || null,
+          setting: $("f-setting").value.trim() || null,
+          runtime_min: $("f-runtime").value.trim() === "" ? null : Number($("f-runtime").value.trim()),
+          chrono_order:
+            $("f-chrono-order").value.trim() === "" ? null : Number($("f-chrono-order").value.trim()),
+          is_estimate: $("f-is-estimate").checked,
+        }
+      : {
+          title: $("f-title").value.trim(),
+          type: $("f-type").value,
+          release_date: $("f-release-date").value.trim() || null,
+          phase: $("f-phase").value.trim() || null,
+          runtime_min: $("f-runtime").value.trim() === "" ? null : Number($("f-runtime").value.trim()),
+          chrono_order:
+            $("f-chrono-order").value.trim() === "" ? null : Number($("f-chrono-order").value.trim()),
+          is_estimate: $("f-is-estimate").checked,
+          crossover_universe: $("f-crossover-universe").value.trim() || null,
+        };
 
     const feedback = $("edit-feedback");
     const btn = ev.target.querySelector("button[type=submit]");
@@ -547,9 +603,14 @@ function adminMain() {
     feedback.textContent = "Saving…";
     feedback.className = "muted";
     try {
-      const res = await apiPut2("/api/admin/items/" + state.editingId, body);
+      const res = await apiPut2(
+        "/api/admin/items/" + state.editingId + "?source=" + state.editingSource,
+        body
+      );
       const updated = res.item;
-      const idx = state.items.findIndex((i) => i.id === updated.id);
+      const idx = state.items.findIndex(
+        (i) => i.id === updated.id && (i.source || "mcu") === (updated.source || "mcu")
+      );
       if (idx !== -1) state.items[idx] = updated;
       feedback.textContent = "Saved.";
       feedback.className = "";
@@ -582,20 +643,30 @@ function adminMain() {
     return res.json();
   }
 
+  function otherSourceBadgeHtml() {
+    return ' <span class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.4px">Other</span>';
+  }
+
   function allRowHtml(item) {
+    const isOther = item.source === "other";
+    const typeLabel = isOther ? item.universe : item.type;
     return (
       '<tr class="admin-clickable-row" data-id="' +
       item.id +
+      '" data-source="' +
+      esc(item.source || "mcu") +
       '"><td><span class="title">' +
       esc(item.title) +
-      "</span></td><td class=\"opt\"><span class=\"badge\" data-type=\"" +
-      esc(item.type) +
+      "</span>" +
+      (isOther ? otherSourceBadgeHtml() : "") +
+      "</td><td class=\"opt\"><span class=\"badge\" data-type=\"" +
+      esc(typeLabel) +
       "\">" +
-      esc(item.type) +
+      esc(typeLabel) +
       "</span></td><td>" +
       esc(displayDate(item.release_date)) +
       '</td><td class="opt">' +
-      esc(item.phase || "—") +
+      esc((isOther ? item.setting : item.phase) || "—") +
       '</td><td class="num opt">' +
       (item.runtime_min === null ? "—" : formatRuntime(item.runtime_min)) +
       '</td><td class="opt">' +
@@ -623,10 +694,20 @@ function adminMain() {
     $("all-rows").innerHTML = sorted.map(allRowHtml).join("");
     for (const row of $("all-rows").querySelectorAll("tr.admin-clickable-row")) {
       row.addEventListener("click", function () {
-        const item = state.items.find((i) => i.id === Number(row.getAttribute("data-id")));
+        const item = findItem(Number(row.getAttribute("data-id")), row.getAttribute("data-source"));
         if (item) openEditor(item);
       });
     }
+  }
+
+  /**
+   * items.id and other_universes.id are independent sequences that overlap
+   * (see the source flag other.js/api.js use elsewhere), so a lookup by id
+   * alone can resolve to the wrong row — every id-based lookup here must be
+   * paired with source.
+   */
+  function findItem(id, source) {
+    return state.items.find((i) => i.id === id && (i.source || "mcu") === (source || "mcu"));
   }
 
   function onSortClick(key) {

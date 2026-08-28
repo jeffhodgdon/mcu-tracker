@@ -123,7 +123,7 @@ export async function handleListItems(request, env) {
   // shape — /api/items stays the single source of catalogue data.
   const { results } = await env.DB.prepare(
     `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate,
-            chrono_order, chrono_setting
+            chrono_order, chrono_setting, crossover_universe
        FROM items
       ORDER BY id`
   ).all();
@@ -170,16 +170,40 @@ async function lookupUserTimezone(env, userId) {
 /* ------------------------------------------------------------ other universes */
 
 export async function handleOtherUniverses(request, env) {
-  const { results } = await env.DB.prepare(
-    `SELECT id, universe, title, setting, release_date, runtime_min, notes
-       FROM other_universes
-      ORDER BY id`
-  ).all();
+  const [{ results }, { results: crossoverResults }] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, universe, title, setting, release_date, runtime_min, notes
+         FROM other_universes
+        ORDER BY id`
+    ).all(),
+    // MCU items with a crossover_universe browse alongside the reference
+    // other_universes rows — flagged source: "mcu" (not "other") so watch
+    // status and the watchlist keep using the item's real items.id/mcu
+    // identity rather than treating it as a second, independent entry.
+    env.DB.prepare(
+      `SELECT id, title, crossover_universe, release_date, runtime_min, notes
+         FROM items
+        WHERE crossover_universe IS NOT NULL
+        ORDER BY id`
+    ).all(),
+  ]);
 
   // Flagged so a watchlist form merging this with /api/items can tell the two
   // id spaces apart — other_universes.id is independent of items.id and is
   // not a valid watchlist item_id (the FK only accepts items.id).
-  return json({ other_universes: results.map((r) => ({ ...r, source: "other" })) });
+  const other = results.map((r) => ({ ...r, source: "other" }));
+  const crossovers = crossoverResults.map((r) => ({
+    id: r.id,
+    universe: r.crossover_universe,
+    title: r.title,
+    setting: null,
+    release_date: r.release_date,
+    runtime_min: r.runtime_min,
+    notes: r.notes,
+    source: "mcu",
+  }));
+
+  return json({ other_universes: [...other, ...crossovers] });
 }
 
 /* ------------------------------------------------------------ watch status */
@@ -469,6 +493,21 @@ const ADMIN_ITEM_FIELDS = new Set([
   "chrono_order",
   "chrono_setting",
   "notes",
+  "crossover_universe",
+]);
+
+// Other Universes rows have no type/phase (it's a browse-only reference
+// table, not the MCU catalogue — see the other_universes migration) and use
+// "universe"/"setting" in place of a franchise phase.
+const ADMIN_OTHER_FIELDS = new Set([
+  "title",
+  "universe",
+  "release_date",
+  "runtime_min",
+  "is_estimate",
+  "chrono_order",
+  "setting",
+  "notes",
 ]);
 
 // Same "generic placeholder" rule shell.js's looksGeneric() uses client-side
@@ -488,6 +527,10 @@ export async function handleAdminAudit(request, env) {
     missingPhase,
     missingChrono,
     episodeRows,
+    otherMissingRuntime,
+    otherEstimatedRuntime,
+    otherMissingReleaseDate,
+    otherMissingChrono,
   ] = await Promise.all([
     env.DB.prepare(
       "SELECT id, title, type, runtime_min FROM items WHERE runtime_min IS NULL ORDER BY id"
@@ -515,7 +558,28 @@ export async function handleAdminAudit(request, env) {
          JOIN items i ON i.id = e.item_id
         ORDER BY e.item_id, e.episode_number`
     ).all(),
+    env.DB.prepare(
+      "SELECT id, title, universe, runtime_min FROM other_universes WHERE runtime_min IS NULL ORDER BY id"
+    ).all(),
+    env.DB.prepare(
+      "SELECT id, title, universe, runtime_min FROM other_universes WHERE is_estimate = 1 ORDER BY id"
+    ).all(),
+    env.DB.prepare(
+      "SELECT id, title, universe, release_date FROM other_universes WHERE release_date IS NULL ORDER BY id"
+    ).all(),
+    // Same "known unplaced" rule as items above — only flag rows that DO have
+    // a setting but are still missing their chrono_order.
+    env.DB.prepare(
+      `SELECT id, title, universe, chrono_order FROM other_universes
+        WHERE chrono_order IS NULL AND setting IS NOT NULL
+        ORDER BY id`
+    ).all(),
   ]);
+
+  // Other Universes rows have no "type" column — the audit table's Type
+  // column instead shows the universe name, tagged with source: "other" so
+  // the client can render it distinctly (see admin.js's auditRowHtml).
+  const tagOther = (rows) => rows.map((r) => ({ ...r, type: r.universe, source: "other" }));
 
   const byItem = new Map();
   for (const row of episodeRows.results) {
@@ -538,11 +602,12 @@ export async function handleAdminAudit(request, env) {
 
   return privateJson({
     audit: {
-      missing_runtime: missingRuntime.results,
-      estimated_runtime: estimatedRuntime.results,
-      missing_release_date: missingReleaseDate.results,
+      missing_runtime: [...missingRuntime.results, ...tagOther(otherMissingRuntime.results)],
+      estimated_runtime: [...estimatedRuntime.results, ...tagOther(otherEstimatedRuntime.results)],
+      missing_release_date: [...missingReleaseDate.results, ...tagOther(otherMissingReleaseDate.results)],
+      // Other Universes has no phase concept — missing_phase stays MCU-only.
       missing_phase: missingPhase.results,
-      missing_chrono_order: missingChrono.results,
+      missing_chrono_order: [...missingChrono.results, ...tagOther(otherMissingChrono.results)],
       missing_episode_names: missingEpisodeNames,
     },
   });
@@ -609,28 +674,46 @@ export async function handleAdminReplaceEpisodes(request, env, itemId) {
 }
 
 export async function handleAdminListItems(request, env) {
-  const { results } = await env.DB.prepare(
-    `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate,
-            chrono_order, chrono_setting
-       FROM items
-      ORDER BY id`
-  ).all();
+  const [items, otherItems] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate,
+              chrono_order, chrono_setting, crossover_universe
+         FROM items
+        ORDER BY id`
+    ).all(),
+    env.DB.prepare(
+      `SELECT id, title, universe, release_date, setting, runtime_min, notes, is_estimate,
+              chrono_order
+         FROM other_universes
+        ORDER BY id`
+    ).all(),
+  ]);
 
   return privateJson({
-    items: results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 })),
+    items: [
+      ...items.results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1, source: "mcu" })),
+      ...otherItems.results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1, source: "other" })),
+    ],
   });
 }
 
-export async function handleAdminPatchItem(request, env, itemId) {
+export async function handleAdminPatchItem(request, env, itemId, source) {
   if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
-
-  const body = await readJsonBody(request);
-  const fields = Object.keys(body).filter((k) => ADMIN_ITEM_FIELDS.has(k));
-  if (fields.length === 0) {
-    return error(`Provide at least one of: ${[...ADMIN_ITEM_FIELDS].join(", ")}`, 400);
+  if (!SOURCES.has(source)) {
+    return error(`source must be one of: ${[...SOURCES].join(", ")}`, 400);
   }
 
-  const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?")
+  const isOther = source === "other";
+  const table = isOther ? "other_universes" : "items";
+  const allowedFields = isOther ? ADMIN_OTHER_FIELDS : ADMIN_ITEM_FIELDS;
+
+  const body = await readJsonBody(request);
+  const fields = Object.keys(body).filter((k) => allowedFields.has(k));
+  if (fields.length === 0) {
+    return error(`Provide at least one of: ${[...allowedFields].join(", ")}`, 400);
+  }
+
+  const exists = await env.DB.prepare(`SELECT 1 AS ok FROM ${table} WHERE id = ?`)
     .bind(itemId)
     .first();
   if (!exists) return error("No such item", 404);
@@ -663,19 +746,30 @@ export async function handleAdminPatchItem(request, env, itemId) {
   }
 
   const setClause = fields.map((f) => `${f} = ?`).join(", ");
-  await env.DB.prepare(`UPDATE items SET ${setClause} WHERE id = ?`)
+  await env.DB.prepare(`UPDATE ${table} SET ${setClause} WHERE id = ?`)
     .bind(...values, itemId)
     .run();
 
+  if (isOther) {
+    const row = await env.DB.prepare(
+      `SELECT id, title, universe, release_date, setting, runtime_min, notes, is_estimate,
+              chrono_order
+         FROM other_universes WHERE id = ?`
+    )
+      .bind(itemId)
+      .first();
+    return privateJson({ item: { ...row, is_estimate: row.is_estimate === 1, source: "other" } });
+  }
+
   const row = await env.DB.prepare(
     `SELECT id, title, type, release_date, phase, runtime_min, notes, is_estimate,
-            chrono_order, chrono_setting
+            chrono_order, chrono_setting, crossover_universe
        FROM items WHERE id = ?`
   )
     .bind(itemId)
     .first();
 
-  return privateJson({ item: { ...row, is_estimate: row.is_estimate === 1 } });
+  return privateJson({ item: { ...row, is_estimate: row.is_estimate === 1, source: "mcu" } });
 }
 
 /* ---------------------------------------------------------------- settings */

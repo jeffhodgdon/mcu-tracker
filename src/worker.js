@@ -260,7 +260,7 @@ async function handleApi(request, env, ctx, url) {
     const itemMatch = /^\/api\/admin\/items\/(\d+)$/.exec(pathname);
     if (itemMatch) {
       return method === "PATCH"
-        ? handleAdminPatchItem(request, env, Number(itemMatch[1]))
+        ? handleAdminPatchItem(request, env, Number(itemMatch[1]), url.searchParams.get("source") || "mcu")
         : methodNotAllowed("PATCH");
     }
 

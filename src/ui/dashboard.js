@@ -966,14 +966,41 @@ function dashboardMain() {
     html += consolidatedSectionHtml();
 
     if (includeOther) {
+      // state.otherItems also carries crossover MCU items (source: "mcu",
+      // from /api/other-universes) — these are meant to appear in BOTH this
+      // group and their MCU franchise group, with a single shared checkbox
+      // state. Keying their entry here with the item's own source ("mcu",
+      // not a fabricated "other") makes pickerGroupHtml render the checkbox
+      // with data-key=wlKey("mcu", id) — the exact same key the MCU-side
+      // checkbox for that item uses — so syncCheckedStateToDom's
+      // [data-key="..."] sweep (already run on every change) keeps both
+      // checkboxes in sync automatically, and submitWatchlist's single
+      // pickerChecked entry per key naturally produces just one watchlist
+      // row regardless of which checkbox was used.
       const others = state.otherItems.filter(isPastOrPresent);
+      // Crossover rows (source: "mcu") carry only the trimmed shape
+      // /api/other-universes returns (title/release_date/runtime_min, no
+      // type/chrono_setting) — swap in the real catalogue item so the type
+      // badge and date/chrono column match what the MCU-side checkbox shows
+      // for the same item, rather than rendering blank/undefined fields.
+      // The source tag is tracked separately (not read off the resolved
+      // item, which has none) so a crossover item still keys/labels as mcu.
+      const resolved = others.map((raw) => ({
+        item: raw.source === "mcu" ? findItem("mcu", raw.id) || raw : raw,
+        source: raw.source === "mcu" ? "mcu" : "other",
+      }));
       const entries =
         mode === "release"
-          ? sortByReleaseDate(others).map((item) => ({ item, source: "other" }))
-          : others
-              .slice()
-              .sort((a, b) => (a.title < b.title ? -1 : 1))
-              .map((item) => ({ item, source: "other" }));
+          ? resolved.slice().sort((a, b) => {
+              const da = a.item.release_date || "";
+              const db = b.item.release_date || "";
+              if (!da && !db) return a.item.id - b.item.id;
+              if (!da) return 1;
+              if (!db) return -1;
+              if (da === db) return a.item.id - b.item.id;
+              return da < db ? -1 : 1;
+            })
+          : resolved.slice().sort((a, b) => (a.item.title < b.item.title ? -1 : 1));
       otherGroupHtml = pickerGroupHtml("Other Universes", entries);
     }
 
@@ -1194,7 +1221,11 @@ function dashboardMain() {
 
     if (kind === "all") {
       for (const item of state.items) next.add(wlKey("mcu", item.id));
-      if (includeOther) for (const item of state.otherItems) next.add(wlKey("other", item.id));
+      if (includeOther) {
+        for (const item of state.otherItems) {
+          if (item.source !== "mcu") next.add(wlKey("other", item.id));
+        }
+      }
     } else if (kind === "films") {
       for (const item of state.items) {
         if (item.type === "Film") next.add(wlKey("mcu", item.id));

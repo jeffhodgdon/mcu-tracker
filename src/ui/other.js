@@ -69,21 +69,27 @@ function otherMain() {
     );
   }
 
+  function mcuBadgeHtml() {
+    return ' <span class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.4px">Also in MCU</span>';
+  }
+
   function rowHtml(row) {
-    const status = state.statuses.get(row.id) || "unwatched";
+    const status = state.statuses.get(wlKey(row)) || "unwatched";
     const type = /Season/.test(row.title || "") ? "TV Series" : "Film";
     const runtime =
       row.runtime_min === null ? '<span class="muted">—</span>' : formatRuntime(row.runtime_min);
     const statusCell =
       '<select data-id="' +
       row.id +
+      '" data-source="' +
+      esc(row.source) +
       '"' +
       (state.signedIn ? "" : " disabled title=\"Sign in to track\"") +
       ">" +
       statusOptions(status) +
       "</select>";
     const watchedCls = status === "watched" ? " watched" : "";
-    const rowAttrs = ' data-id="' + row.id + '"';
+    const rowAttrs = ' data-id="' + row.id + '" data-source="' + esc(row.source) + '"';
 
     const desktopRow =
       "<tr" +
@@ -92,7 +98,9 @@ function otherMain() {
       watchedCls +
       '"><td><span class="title">' +
       esc(row.title) +
-      "</span></td>" +
+      "</span>" +
+      (row.source === "mcu" ? mcuBadgeHtml() : "") +
+      "</td>" +
       '<td class="opt"><span class="badge" data-type="' +
       esc(type) +
       '">' +
@@ -122,6 +130,7 @@ function otherMain() {
       '<span class="title">' +
       esc(row.title) +
       "</span>" +
+      (row.source === "mcu" ? mcuBadgeHtml() : "") +
       '<span class="wl-mobile-runtime">' +
       runtime +
       "</span>" +
@@ -154,20 +163,30 @@ function otherMain() {
     return displayDate(value);
   }
 
+  function wlKey(row) {
+    return row.source + ":" + row.id;
+  }
+
   async function onStatusChange(ev) {
     const select = ev.target;
     const id = Number(select.getAttribute("data-id"));
+    const source = select.getAttribute("data-source") || "other";
+    const key = source + ":" + id;
     const next = select.value;
-    const previous = state.statuses.get(id) || "unwatched";
+    const previous = state.statuses.get(key) || "unwatched";
 
     select.disabled = true;
     try {
-      await apiPut("/api/watch-status/" + id + "?source=other", { status: next });
-      state.statuses.set(id, next);
-      for (const row of $("rows").querySelectorAll('tr[data-id="' + id + '"]')) {
+      await apiPut("/api/watch-status/" + id + "?source=" + source, { status: next });
+      state.statuses.set(key, next);
+      for (const row of $("rows").querySelectorAll(
+        'tr[data-id="' + id + '"][data-source="' + source + '"]'
+      )) {
         row.classList.toggle("watched", next === "watched");
       }
-      for (const sel of $("rows").querySelectorAll('select[data-id="' + id + '"]')) {
+      for (const sel of $("rows").querySelectorAll(
+        'select[data-id="' + id + '"][data-source="' + source + '"]'
+      )) {
         sel.value = next;
       }
     } catch (e) {
@@ -192,7 +211,7 @@ function otherMain() {
       if (state.signedIn) {
         const watch = await apiGet("/api/watch-status");
         for (const row of (watch.data && watch.data.watch_status) || []) {
-          if (row.source === "other") state.statuses.set(row.item_id, row.status);
+          state.statuses.set((row.source || "mcu") + ":" + row.item_id, row.status);
         }
       }
 
