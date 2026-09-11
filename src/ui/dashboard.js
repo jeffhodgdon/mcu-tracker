@@ -770,15 +770,37 @@ function dashboardMain() {
   // .wl-mobile-runtime, both present on the two sibling <tr>s sharing this
   // item's data-key — see watchlistRowHtml above) so it shows unwatched
   // episode time rather than staying frozen at the full season runtime.
+  //
+  // Sums straight off the episode checkboxes actually in the DOM right now,
+  // rather than episodeProgress()/EPISODE_CACHE's cached statuses map — that
+  // cache read null (nothing watched) as "no progress" and left the cell
+  // showing whatever it last displayed, so unchecking every episode back to
+  // zero never brought the runtime back to the full season total.
   function updateSeasonRowRuntime(itemId) {
-    const key = wlKey("mcu", Number(itemId));
-    const progress = episodeProgress(Number(itemId));
-    const text = progress ? formatRuntime(progress.remainingMinutes) : null;
-    if (text === null) return;
+    const cached = EPISODE_CACHE.get(Number(itemId));
+    if (!cached || !cached.episodes.length) return;
 
+    const cell = $("watchlist-rows").querySelector(
+      'tr[data-episode-rows="' + itemId + '"] td'
+    );
+    if (!cell) return;
+
+    const checkedIds = new Set();
+    for (const cb of cell.querySelectorAll(".episode-watch-cb")) {
+      if (cb.checked) checkedIds.add(Number(cb.getAttribute("data-episode-id")));
+    }
+
+    let remainingMinutes = 0;
+    for (const ep of cached.episodes) {
+      if (checkedIds.has(ep.id)) continue;
+      if (typeof ep.runtime_min === "number") remainingMinutes += ep.runtime_min;
+    }
+
+    const text = formatRuntime(remainingMinutes);
+    const key = wlKey("mcu", Number(itemId));
     for (const row of $("watchlist-rows").querySelectorAll('tr[data-key="' + esc(key) + '"]')) {
-      for (const cell of row.querySelectorAll(".wl-runtime, .wl-mobile-runtime")) {
-        cell.textContent = text;
+      for (const el of row.querySelectorAll(".wl-runtime, .wl-mobile-runtime")) {
+        el.textContent = text;
       }
     }
   }
