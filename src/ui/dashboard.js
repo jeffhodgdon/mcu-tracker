@@ -225,16 +225,29 @@ function dashboardMain() {
   // shrink the item's contribution to the remaining-time stat rather than
   // waiting for the whole season to flip to "watched". Items never expanded
   // have no cache entry, so they fall back to counting their full runtime.
-  function episodeWatchedMinutes(itemId) {
+  //
+  // Returns null when there's no episode data to work from (falls back to
+  // season-level logic), or { any, all, remainingMinutes } once at least one
+  // episode has been checked off.
+  function episodeProgress(itemId) {
     const cached = EPISODE_CACHE.get(itemId);
-    if (!cached) return null;
-    let minutes = 0;
+    if (!cached || !cached.episodes.length) return null;
+
+    let watchedCount = 0;
+    let remainingMinutes = 0;
     for (const ep of cached.episodes) {
-      if (cached.statuses.get(ep.id) === "watched" && typeof ep.runtime_min === "number") {
-        minutes += ep.runtime_min;
+      if (cached.statuses.get(ep.id) === "watched") {
+        watchedCount++;
+      } else if (typeof ep.runtime_min === "number") {
+        remainingMinutes += ep.runtime_min;
       }
     }
-    return minutes;
+    if (watchedCount === 0) return null;
+
+    return {
+      all: watchedCount === cached.episodes.length,
+      remainingMinutes,
+    };
   }
 
   function computeTotals() {
@@ -249,12 +262,23 @@ function dashboardMain() {
 
       total++;
       const status = state.statuses.get(wlKey(entry.source, entry.item_id)) || "unwatched";
-      if (status === "watched") watched++;
-      if (countsAsRemaining(status)) {
-        if (typeof item.runtime_min === "number") {
-          const watchedMin = episodeWatchedMinutes(entry.item_id);
-          remainingMinutes += watchedMin !== null ? Math.max(0, item.runtime_min - watchedMin) : item.runtime_min;
-        } else unknownRuntime++;
+      const progress = episodeProgress(entry.item_id);
+
+      // Every episode checked counts the item as watched for the stat card
+      // even if the season-level status control hasn't itself been flipped.
+      if (status === "watched" || (progress && progress.all)) {
+        watched++;
+        continue;
+      }
+
+      if (!countsAsRemaining(status)) continue;
+
+      if (progress) {
+        remainingMinutes += progress.remainingMinutes;
+      } else if (typeof item.runtime_min === "number") {
+        remainingMinutes += item.runtime_min;
+      } else {
+        unknownRuntime++;
       }
     }
     return { watched, remainingMinutes, unknownRuntime, total };
