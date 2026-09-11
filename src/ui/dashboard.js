@@ -762,6 +762,25 @@ function dashboardMain() {
 
   function onEpisodeProgressChange(itemId) {
     renderStats();
+    updateSeasonRowRuntime(itemId);
+  }
+
+  // Mirrors episodeProgress()'s contribution to computeTotals() onto the
+  // season row's own runtime cell (desktop .wl-runtime and mobile
+  // .wl-mobile-runtime, both present on the two sibling <tr>s sharing this
+  // item's data-key — see watchlistRowHtml above) so it shows unwatched
+  // episode time rather than staying frozen at the full season runtime.
+  function updateSeasonRowRuntime(itemId) {
+    const key = wlKey("mcu", Number(itemId));
+    const progress = episodeProgress(Number(itemId));
+    const text = progress ? formatRuntime(progress.remainingMinutes) : null;
+    if (text === null) return;
+
+    for (const row of $("watchlist-rows").querySelectorAll('tr[data-key="' + esc(key) + '"]')) {
+      for (const cell of row.querySelectorAll(".wl-runtime, .wl-mobile-runtime")) {
+        cell.textContent = text;
+      }
+    }
   }
 
   function onWatchlistLine1Click(ev) {
