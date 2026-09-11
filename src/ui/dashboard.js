@@ -220,6 +220,23 @@ function dashboardMain() {
   // other_universes rows carry their own runtime_min just like items does,
   // so there's nothing source-specific stopping either total from including
   // them.
+  // For a TV item whose episodes have been expanded at least once (and are
+  // therefore sitting in EPISODE_CACHE), individually-checked episodes should
+  // shrink the item's contribution to the remaining-time stat rather than
+  // waiting for the whole season to flip to "watched". Items never expanded
+  // have no cache entry, so they fall back to counting their full runtime.
+  function episodeWatchedMinutes(itemId) {
+    const cached = EPISODE_CACHE.get(itemId);
+    if (!cached) return null;
+    let minutes = 0;
+    for (const ep of cached.episodes) {
+      if (cached.statuses.get(ep.id) === "watched" && typeof ep.runtime_min === "number") {
+        minutes += ep.runtime_min;
+      }
+    }
+    return minutes;
+  }
+
   function computeTotals() {
     let watched = 0;
     let remainingMinutes = 0;
@@ -234,8 +251,10 @@ function dashboardMain() {
       const status = state.statuses.get(wlKey(entry.source, entry.item_id)) || "unwatched";
       if (status === "watched") watched++;
       if (countsAsRemaining(status)) {
-        if (typeof item.runtime_min === "number") remainingMinutes += item.runtime_min;
-        else unknownRuntime++;
+        if (typeof item.runtime_min === "number") {
+          const watchedMin = episodeWatchedMinutes(entry.item_id);
+          remainingMinutes += watchedMin !== null ? Math.max(0, item.runtime_min - watchedMin) : item.runtime_min;
+        } else unknownRuntime++;
       }
     }
     return { watched, remainingMinutes, unknownRuntime, total };
@@ -702,7 +721,7 @@ function dashboardMain() {
       parent.addEventListener("click", onWatchedGroupToggle);
     }
 
-    wireEpisodeToggles($("watchlist-rows"));
+    wireEpisodeToggles($("watchlist-rows"), onEpisodeProgressChange);
 
     // Mobile: the whole line-1 div is a tap target for TV rows, mirroring
     // the ▶ arrow's own expand/collapse — clicking the arrow itself already
@@ -715,6 +734,10 @@ function dashboardMain() {
     if (watched.length && state.watchedGroupExpanded) {
       applyWatchedGroupState(true);
     }
+  }
+
+  function onEpisodeProgressChange(itemId) {
+    renderStats();
   }
 
   function onWatchlistLine1Click(ev) {
