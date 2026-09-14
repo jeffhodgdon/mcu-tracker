@@ -805,6 +805,52 @@ function dashboardMain() {
     }
   }
 
+  // Sums remaining runtime straight off EPISODE_CACHE (rather than DOM
+  // checkboxes like updateSeasonRowRuntime does) so it can run for a season
+  // that has never been expanded — e.g. right after the background prefetch
+  // below populates the cache, with no episode rows in the DOM yet.
+  function updateSeasonRowRuntimeFromCache(itemId) {
+    const cached = EPISODE_CACHE.get(Number(itemId));
+    if (!cached || !cached.episodes.length) return;
+
+    let remainingMinutes = 0;
+    for (const ep of cached.episodes) {
+      if (cached.statuses.get(ep.id) === "watched") continue;
+      if (typeof ep.runtime_min === "number") remainingMinutes += ep.runtime_min;
+    }
+
+    const text = formatRuntime(remainingMinutes);
+    const key = wlKey("mcu", Number(itemId));
+    for (const row of $("watchlist-rows").querySelectorAll('tr[data-key="' + esc(key) + '"]')) {
+      for (const el of row.querySelectorAll(".wl-runtime, .wl-mobile-runtime")) {
+        el.textContent = text;
+      }
+    }
+  }
+
+  // Warms EPISODE_CACHE for every TV season on the watch list right after
+  // load, then immediately reflects each one's remaining runtime on its
+  // season row — without this, a season row shows its full runtime until the
+  // user happens to expand it or toggle an episode checkbox.
+  async function prefetchWatchlistEpisodeRuntimes() {
+    const tvEntries = state.watchlist.filter((entry) => {
+      if (entry.source !== "mcu") return false;
+      const item = findItem(entry.source, entry.item_id);
+      return item && TV_TYPES.indexOf(item.type) !== -1;
+    });
+
+    await Promise.all(
+      tvEntries.map(async (entry) => {
+        try {
+          await loadEpisodeData(entry.item_id);
+          updateSeasonRowRuntimeFromCache(entry.item_id);
+        } catch (e) {
+          // Best-effort — leave the row showing the season's full runtime.
+        }
+      })
+    );
+  }
+
   function onWatchlistLine1Click(ev) {
     if (ev.target.closest(".episode-toggle")) return;
     const line = ev.currentTarget;
@@ -1447,6 +1493,7 @@ function dashboardMain() {
       renderCountdown();
       renderUpcoming();
       renderWatchlistTable();
+      prefetchWatchlistEpisodeRuntimes().then(renderStats);
 
       $("countdown-edit-btn").addEventListener("click", openCountdownModal);
       $("countdown-set-btn").addEventListener("click", openCountdownModal);
