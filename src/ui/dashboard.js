@@ -1447,6 +1447,11 @@ function dashboardMain() {
     }
   }
 
+  // Sends the complete intended watch list — every key in pickerChecked, not
+  // just what changed — and the server removes anything not in it. That is
+  // also why unticking "Include Other Universes" drops source "other" rows
+  // here: with it off they are not part of the intended list. Crossover items
+  // are keyed source "mcu" and so are unaffected by the toggle.
   async function submitWatchlist() {
     const includeOther = $("watchlist-include-other").checked;
     const items = [];

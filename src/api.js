@@ -550,16 +550,34 @@ export async function handlePostWatchlist(request, env, user) {
     entries.push({ id, source });
   }
 
-  // INSERT OR IGNORE makes duplicate entries in the batch, and entries
-  // already on the watchlist, silent no-ops rather than errors — the
-  // UNIQUE(user_id, item_id, source) constraint is what "ignores duplicates"
-  // leans on.
-  const statements = entries.map((entry) =>
-    env.DB.prepare(
-      "INSERT OR IGNORE INTO watchlist (user_id, item_id, source) VALUES (?, ?, ?)"
-    ).bind(user.user_id, entry.id, entry.source)
-  );
-  await env.DB.batch(statements);
+  // The payload is the full intended watchlist, not a list of additions: rows
+  // on the watchlist but missing from it are removed, so unticking an item
+  // in the Build Watch List modal and saving actually takes it off.
+  const key = (id, source) => `${source}:${id}`;
+  const incoming = new Map(entries.map((e) => [key(e.id, e.source), e]));
+  const current = await selectWatchlist(env, user.user_id);
+  const currentKeys = new Set(current.map((r) => key(r.item_id, r.source)));
+
+  const removed = current.filter((r) => !incoming.has(key(r.item_id, r.source)));
+  const added = [...incoming.values()].filter((e) => !currentKeys.has(key(e.id, e.source)));
+
+  // One D1 batch (one implicit transaction), so a save never half-applies.
+  // INSERT OR IGNORE still guards against a row another tab added between
+  // the read above and this write — UNIQUE(user_id, item_id, source) is what
+  // it leans on.
+  const statements = [
+    ...removed.map((r) =>
+      env.DB.prepare(
+        "DELETE FROM watchlist WHERE user_id = ? AND item_id = ? AND source = ?"
+      ).bind(user.user_id, r.item_id, r.source)
+    ),
+    ...added.map((e) =>
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO watchlist (user_id, item_id, source) VALUES (?, ?, ?)"
+      ).bind(user.user_id, e.id, e.source)
+    ),
+  ];
+  if (statements.length) await env.DB.batch(statements);
 
   return privateJson({ watchlist: await selectWatchlist(env, user.user_id) });
 }
