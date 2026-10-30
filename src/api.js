@@ -582,6 +582,17 @@ export async function handlePostWatchlist(request, env, user) {
   return privateJson({ watchlist: await selectWatchlist(env, user.user_id) });
 }
 
+/**
+ * Empties the user's watchlist in one statement. Deliberately leaves
+ * watch_status alone — the watchlist is only "what I plan to watch", so
+ * clearing it must not erase progress; an item added back later picks its
+ * old status and episode checkmarks straight back up.
+ */
+export async function handleClearWatchlist(request, env, user) {
+  await env.DB.prepare("DELETE FROM watchlist WHERE user_id = ?").bind(user.user_id).run();
+  return privateJson({ ok: true });
+}
+
 export async function handleDeleteWatchlistItem(request, env, user, itemId, source) {
   if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
   if (!WATCHLIST_SOURCES.has(source)) {

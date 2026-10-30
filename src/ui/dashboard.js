@@ -1422,19 +1422,14 @@ function dashboardMain() {
       closeWatchlistModal();
       return;
     }
-    if (!confirm("Remove all items from your watch list?")) return;
+    if (!confirm("Remove all items from your watch list? Your watch progress is kept.")) return;
 
     statusBox.textContent = "Clearing…";
     $("watchlist-clear-btn").disabled = true;
     try {
-      for (const entry of state.watchlist) {
-        await apiPut(
-          "/api/watch-status/" + entry.item_id + "?source=" + encodeURIComponent(entry.source),
-          { status: "unwatched" }
-        );
-        state.statuses.set(wlKey(entry.source, entry.item_id), "unwatched");
-        await apiDelete("/api/watchlist/" + entry.item_id + "?source=" + entry.source);
-      }
+      // One request, all-or-nothing. Watch status is left untouched, so
+      // state.statuses (and EPISODE_CACHE) stay valid for items added back.
+      await apiDelete("/api/watchlist");
       state.watchlist = [];
       state.pickerChecked = new Set();
       renderWatchlistTable();

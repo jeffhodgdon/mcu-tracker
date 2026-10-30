@@ -21,6 +21,7 @@ import {
   handleAdminListItems,
   handleAdminPatchItem,
   handleAdminReplaceEpisodes,
+  handleClearWatchlist,
   handleClearWatchStatus,
   handleConsolidated,
   handleDeleteAccount,
@@ -379,7 +380,8 @@ async function handleApi(request, env, ctx, url) {
     if (!user) return unauthorized();
     if (method === "GET") return handleGetWatchlist(request, env, user);
     if (method === "POST") return handlePostWatchlist(request, env, user);
-    return methodNotAllowed("GET, POST");
+    if (method === "DELETE") return handleClearWatchlist(request, env, user);
+    return methodNotAllowed("GET, POST, DELETE");
   }
 
   const watchlistMatch = /^\/api\/watchlist\/(.+)$/.exec(pathname);
