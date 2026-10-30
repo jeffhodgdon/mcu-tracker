@@ -14,19 +14,13 @@ import {
   clearedSessionCookie,
 } from "./auth.js";
 import { consolidateItems } from "./consolidate.js";
+import { TIMEZONE_VALUES } from "./timezones.js";
 
 const DEFAULT_TIMEZONE = "America/New_York";
 
 const WATCH_STATUSES = new Set(["unwatched", "watched", "want_rewatch", "skip"]);
 const WATCHLIST_SORTS = new Set(["release", "chronological"]);
 const SOURCES = new Set(["mcu", "other"]);
-const TIMEZONES = new Set([
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "UTC",
-]);
 const FEEDBACK_TYPES = new Set(["Wrong data", "Missing data", "Bug report", "Other"]);
 // Each submission also fires the n8n webhook, so this caps notification spam
 // from any one account, not just rows in the table.
@@ -1120,8 +1114,10 @@ export async function handlePutSettings(request, env, user) {
   let timezone = hasTimezone ? "America/New_York" : existing?.timezone ?? "America/New_York";
   if (hasTimezone && body.timezone !== null && body.timezone !== undefined) {
     timezone = String(body.timezone);
-    if (!TIMEZONES.has(timezone)) {
-      return error(`timezone must be one of: ${[...TIMEZONES].join(", ")}`, 400);
+    // Same list the Settings dropdown offers (timezones.js), so anything the
+    // UI lets you pick saves, and nothing else does.
+    if (!TIMEZONE_VALUES.has(timezone)) {
+      return error("timezone must be one of the timezones offered in Settings", 400);
     }
   }
 
