@@ -401,23 +401,34 @@ function initNav() {
 }
 
 async function initSignedInLabel() {
+  // All three fire at once rather than one after another — none needs the
+  // others' result to start, so the page only waits for the slowest instead
+  // of the sum. Each has its own fallback so one failing never rejects the
+  // others: a failed /api/me reads as signed out, a failed /api/settings
+  // keeps the America/New_York default, and a failed /api/stats just skips
+  // the decorative "Users Tracking" line. A signed-out visitor's
+  // /api/settings comes back 401, which apiGet already treats as no data.
+  const [me, settings, stats] = await Promise.all([
+    apiGet("/api/me").catch(function () {
+      return { signedIn: false, data: null };
+    }),
+    apiGet("/api/settings").catch(function () {
+      return null;
+    }),
+    apiGet("/api/stats").catch(function () {
+      return null;
+    }),
+  ]);
+
   try {
-    const me = await apiGet("/api/me");
     // The nav rail is duplicated into the mobile drawer (shell.js's markup),
     // so every "whoami"/"nav-admin" target is a class shared by both copies
     // rather than a single id — querySelectorAll keeps them in sync instead
     // of only ever updating whichever copy happened to match getElementById.
     const boxes = [...document.querySelectorAll(".whoami")];
 
-    if (me.signedIn) {
-      try {
-        const settings = await apiGet("/api/settings");
-        if (settings.data && settings.data.settings && settings.data.settings.timezone) {
-          window.userTimezone = settings.data.settings.timezone;
-        }
-      } catch (e) {
-        // Keep the America/New_York default set above if this fails.
-      }
+    if (me.signedIn && settings && settings.data && settings.data.settings && settings.data.settings.timezone) {
+      window.userTimezone = settings.data.settings.timezone;
     }
 
     if (!boxes.length) return me;
@@ -443,8 +454,7 @@ async function initSignedInLabel() {
       }
     }
 
-    try {
-      const stats = await apiGet("/api/stats");
+    if (stats && stats.data) {
       const count = stats.data.user_count;
       for (const box of boxes) {
         const line = document.createElement("div");
@@ -454,8 +464,6 @@ async function initSignedInLabel() {
         line.textContent = "Users Tracking: " + count;
         box.insertBefore(line, box.firstChild);
       }
-    } catch (e) {
-      // stats are decorative; skip silently if unavailable
     }
 
     return me;
