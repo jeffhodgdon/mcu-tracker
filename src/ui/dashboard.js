@@ -184,6 +184,32 @@ function dashboardMain() {
     return list.find((i) => i.id === id) || null;
   }
 
+  // Today's date as "YYYY-MM-DD" in the given IANA timezone — mirrors
+  // consolidate.js's todayInZone(), reimplemented here since this file runs
+  // in the browser bundle rather than the Worker.
+  function todayInZone(tz) {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  }
+
+  // Whole calendar days from today in the user's timezone to an ISO date;
+  // negative once past, null for partial placeholders. Used instead of
+  // format.js's daysUntil(), whose UTC "today" rolled the countdown over at
+  // 8pm Eastern rather than at the user's own midnight. Both dates are pinned
+  // to UTC midnight before subtracting, so this is a pure calendar-day
+  // difference with no DST hour to round away.
+  function daysFromToday(isoDate) {
+    if (!isRealDate(isoDate)) return null;
+    const today = todayInZone(window.userTimezone || "America/New_York");
+    return Math.round(
+      (Date.parse(isoDate + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 86400000
+    );
+  }
+
   // shell.js only exposes apiGet/apiPut as shared runtime helpers — the
   // watchlist needs POST and DELETE too, so those live here rather than
   // touching the shared file for a page-local need.
@@ -312,7 +338,7 @@ function dashboardMain() {
     }
 
     const target = state.settings && state.settings.countdown_target_date;
-    const days = target ? daysUntil(target) : null;
+    const days = target ? daysFromToday(target) : null;
 
     if (!target || days === null) {
       $("stat-pace").textContent = "—";
@@ -334,7 +360,7 @@ function dashboardMain() {
   function renderCountdown() {
     const s = state.settings || {};
     const target = s.countdown_target_date;
-    const days = target ? daysUntil(target) : null;
+    const days = target ? daysFromToday(target) : null;
 
     $("countdown-summary").classList.toggle("hide", !target);
     $("countdown-edit-btn").classList.toggle("hide", !target);
@@ -365,7 +391,7 @@ function dashboardMain() {
     // Only fully-specified future dates: partial placeholders like 2027-07-00
     // are not confirmed releases and cannot anchor a countdown.
     const upcoming = state.items
-      .filter((i) => isRealDate(i.release_date) && daysUntil(i.release_date) > 0)
+      .filter((i) => isRealDate(i.release_date) && daysFromToday(i.release_date) > 0)
       .sort((a, b) => (a.release_date < b.release_date ? -1 : 1))
       .slice(0, 10);
 
@@ -386,7 +412,7 @@ function dashboardMain() {
           '</span><span class="d">' +
           esc(displayDate(i.release_date)) +
           " · " +
-          daysUntil(i.release_date) +
+          daysFromToday(i.release_date) +
           "d</span></button>"
       )
       .join("");
@@ -1002,7 +1028,7 @@ function dashboardMain() {
     const value = /^\d{4}$/.test(item.release_date || "")
       ? normalizeDateKey(item.release_date)
       : item.release_date;
-    return isRealDate(value) && daysUntil(value) <= 0;
+    return isRealDate(value) && daysFromToday(value) <= 0;
   }
 
   // Per-type groups, each sorted by release_date, in fixed MCU_TYPE_ORDER.
