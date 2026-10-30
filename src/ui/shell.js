@@ -307,14 +307,22 @@ async function apiPost(path, body) {
   return res.json();
 }
 
-/** Marks every episode of an item watched/unwatched, mirroring a season-level "mark all". */
+/**
+ * Marks every episode of an item watched/unwatched, mirroring a season-level
+ * "mark all". One request for the whole season, applied server-side as a
+ * single D1 batch — so it either fully succeeds or throws with nothing
+ * changed, rather than leaving the season half-marked partway through.
+ */
 async function episodeMarkAll(itemId, watched) {
   const data = await loadEpisodeData(itemId);
+  if (!data.episodes.length) return;
   const next = watched ? "watched" : "unwatched";
-  for (const ep of data.episodes) {
-    await apiPost("/api/watch", { item_id: itemId, episode_id: ep.id, status: next });
-    data.statuses.set(ep.id, next);
-  }
+  await apiPost("/api/watch/batch", {
+    updates: data.episodes.map(function (ep) {
+      return { item_id: itemId, episode_id: ep.id, status: next };
+    }),
+  });
+  for (const ep of data.episodes) data.statuses.set(ep.id, next);
   const cell = document.querySelector('tr[data-episode-rows="' + itemId + '"] td');
   if (cell && !cell.querySelector(".episode-no-data")) {
     for (const row of cell.querySelectorAll(".episode-row")) {

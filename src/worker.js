@@ -33,6 +33,7 @@ import {
   handleLogout,
   handleOtherUniverses,
   handlePostWatch,
+  handlePostWatchBatch,
   handlePostWatchlist,
   handlePutSettings,
   handlePutWatchStatus,
@@ -337,6 +338,12 @@ async function handleApi(request, env, ctx, url) {
     if (method !== "POST") return methodNotAllowed("POST");
     if (!user) return unauthorized();
     return handlePostWatch(request, env, user);
+  }
+
+  if (pathname === "/api/watch/batch") {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!user) return unauthorized();
+    return handlePostWatchBatch(request, env, user);
   }
 
   if (pathname === "/api/watch/episodes") {

@@ -341,22 +341,56 @@ export async function handleGetItemEpisodes(request, env, itemId) {
  * but accepts an optional episode_id — omitted or 0 means season-level,
  * matching the sentinel the 0009 migration standardized on.
  */
+/**
+ * Shape-checks one { item_id, source, episode_id, status } update, shared by
+ * POST /api/watch and POST /api/watch/batch so both accept exactly the same
+ * input. Throws HttpError(400); existence of the item/episode is checked by
+ * each caller (one row vs. bulk lookups).
+ */
+function parseWatchUpdate(raw) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new HttpError("Each update must be an object", 400);
+  }
+
+  const itemId = Number(raw.item_id);
+  if (!Number.isInteger(itemId) || itemId < 1) {
+    throw new HttpError("item_id must be a positive integer", 400);
+  }
+
+  const source = String(raw.source ?? "mcu");
+  if (!SOURCES.has(source)) {
+    throw new HttpError(`source must be one of: ${[...SOURCES].join(", ")}`, 400);
+  }
+
+  const hasEpisodeId = Object.hasOwn(raw, "episode_id") && raw.episode_id !== null;
+  const episodeId = hasEpisodeId ? Number(raw.episode_id) : 0;
+  if (!Number.isInteger(episodeId) || episodeId < 0) {
+    throw new HttpError("episode_id must be a positive integer or null", 400);
+  }
+
+  if (!Object.hasOwn(raw, "status")) throw new HttpError("status is required", 400);
+  const status = String(raw.status);
+  if (!WATCH_STATUSES.has(status)) {
+    throw new HttpError(`status must be one of: ${[...WATCH_STATUSES].join(", ")}`, 400);
+  }
+
+  return { itemId, source, episodeId, status };
+}
+
+function upsertWatchStatement(env, userId, u) {
+  return env.DB.prepare(
+    `INSERT INTO watch_status (user_id, item_id, source, episode_id, status, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(user_id, item_id, source, episode_id) DO UPDATE SET
+       status = excluded.status,
+       updated_at = excluded.updated_at`
+  ).bind(userId, u.itemId, u.source, u.episodeId, u.status);
+}
+
 export async function handlePostWatch(request, env, user) {
   const body = await readJsonBody(request);
-
-  const itemId = Number(body.item_id);
-  if (!Number.isInteger(itemId) || itemId < 1) return error("item_id must be a positive integer", 400);
-
-  const source = String(body.source ?? "mcu");
-  if (!SOURCES.has(source)) {
-    return error(`source must be one of: ${[...SOURCES].join(", ")}`, 400);
-  }
-
-  const hasEpisodeId = Object.hasOwn(body, "episode_id") && body.episode_id !== null;
-  const episodeId = hasEpisodeId ? Number(body.episode_id) : 0;
-  if (!Number.isInteger(episodeId) || episodeId < 0) {
-    return error("episode_id must be a positive integer or null", 400);
-  }
+  const update = parseWatchUpdate(body);
+  const { itemId, source, episodeId } = update;
 
   const table = source === "other" ? "other_universes" : "items";
   const exists = await env.DB.prepare(`SELECT 1 AS ok FROM ${table} WHERE id = ?`)
@@ -373,21 +407,7 @@ export async function handlePostWatch(request, env, user) {
     if (!episodeExists) return error("No such episode for this item", 404);
   }
 
-  if (!Object.hasOwn(body, "status")) return error("status is required", 400);
-  const status = String(body.status);
-  if (!WATCH_STATUSES.has(status)) {
-    return error(`status must be one of: ${[...WATCH_STATUSES].join(", ")}`, 400);
-  }
-
-  await env.DB.prepare(
-    `INSERT INTO watch_status (user_id, item_id, source, episode_id, status, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(user_id, item_id, source, episode_id) DO UPDATE SET
-       status = excluded.status,
-       updated_at = excluded.updated_at`
-  )
-    .bind(user.user_id, itemId, source, episodeId, status)
-    .run();
+  await upsertWatchStatement(env, user.user_id, update).run();
 
   const row = await env.DB.prepare(
     `SELECT item_id, source, episode_id, status, updated_at
@@ -397,6 +417,81 @@ export async function handlePostWatch(request, env, user) {
     .first();
 
   return privateJson({ watch_status: row });
+}
+
+// Comfortably above the largest season in the catalogue (10 episodes), and
+// keeps each bulk IN (...) lookup below within D1's 100-bound-parameter limit.
+const WATCH_BATCH_MAX = 100;
+
+/** Rows of `sql` (which must end in `IN`) for the given ids, or [] for none. */
+async function selectWhereIdIn(env, sql, ids) {
+  if (!ids.length) return [];
+  const { results } = await env.DB.prepare(`${sql} (${ids.map(() => "?").join(", ")})`)
+    .bind(...ids)
+    .all();
+  return results;
+}
+
+/**
+ * Many watch-status changes in one request — e.g. "mark all episodes
+ * watched" — validated per entry exactly like POST /api/watch, then written
+ * in a single D1 batch (one implicit transaction), so the request either
+ * applies every update or none of them. Any invalid entry rejects the whole
+ * batch, with its index in the error message.
+ */
+export async function handlePostWatchBatch(request, env, user) {
+  const body = await readJsonBody(request);
+
+  if (!Array.isArray(body.updates) || body.updates.length === 0) {
+    return error("updates must be a non-empty array of { item_id, source, episode_id, status }", 400);
+  }
+  if (body.updates.length > WATCH_BATCH_MAX) {
+    return error(`updates may contain at most ${WATCH_BATCH_MAX} entries`, 400);
+  }
+
+  const updates = [];
+  for (const [i, raw] of body.updates.entries()) {
+    try {
+      updates.push(parseWatchUpdate(raw));
+    } catch (err) {
+      if (err instanceof HttpError) return error(`updates[${i}]: ${err.message}`, err.status);
+      throw err;
+    }
+  }
+
+  const unique = (values) => [...new Set(values)];
+  const [mcuRows, otherRows, episodeRows] = await Promise.all([
+    selectWhereIdIn(
+      env,
+      "SELECT id FROM items WHERE id IN",
+      unique(updates.filter((u) => u.source === "mcu").map((u) => u.itemId))
+    ),
+    selectWhereIdIn(
+      env,
+      "SELECT id FROM other_universes WHERE id IN",
+      unique(updates.filter((u) => u.source === "other").map((u) => u.itemId))
+    ),
+    selectWhereIdIn(
+      env,
+      "SELECT id, item_id FROM episodes WHERE id IN",
+      unique(updates.filter((u) => u.episodeId !== 0).map((u) => u.episodeId))
+    ),
+  ]);
+  const mcuIds = new Set(mcuRows.map((r) => r.id));
+  const otherIds = new Set(otherRows.map((r) => r.id));
+  const episodeItem = new Map(episodeRows.map((r) => [r.id, r.item_id]));
+
+  for (const [i, u] of updates.entries()) {
+    const itemExists = u.source === "other" ? otherIds.has(u.itemId) : mcuIds.has(u.itemId);
+    if (!itemExists) return error(`updates[${i}]: No such item`, 404);
+    if (u.episodeId !== 0 && episodeItem.get(u.episodeId) !== u.itemId) {
+      return error(`updates[${i}]: No such episode for this item`, 404);
+    }
+  }
+
+  await env.DB.batch(updates.map((u) => upsertWatchStatement(env, user.user_id, u)));
+
+  return privateJson({ ok: true, count: updates.length });
 }
 
 /** All episode-level watch statuses for one item, for the signed-in user. */
