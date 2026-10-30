@@ -28,6 +28,9 @@ const TIMEZONES = new Set([
   "UTC",
 ]);
 const FEEDBACK_TYPES = new Set(["Wrong data", "Missing data", "Bug report", "Other"]);
+// Each submission also fires the n8n webhook, so this caps notification spam
+// from any one account, not just rows in the table.
+const FEEDBACK_LIMIT_PER_HOUR = 3;
 
 /**
  * True only for real calendar dates in YYYY-MM-DD form.
@@ -1137,6 +1140,21 @@ export async function handleSubmitFeedback(request, env, user) {
     }
   }
 
+  // created_at is written by datetime('now'), so comparing against the same
+  // SQLite clock keeps the window exact regardless of the Worker's own time.
+  const recent = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM feedback WHERE user_id = ? AND created_at > datetime('now', '-1 hour')"
+  )
+    .bind(user.user_id)
+    .first();
+  if (recent.n >= FEEDBACK_LIMIT_PER_HOUR) {
+    return error(
+      "You've submitted too much feedback recently. Please wait before submitting again.",
+      429,
+      { "cache-control": PRIVATE_CACHE_CONTROL }
+    );
+  }
+
   await env.DB.prepare(
     "INSERT INTO feedback (user_id, type, item_id, message) VALUES (?, ?, ?, ?)"
   )
@@ -1155,14 +1173,26 @@ const FEEDBACK_WEBHOOK_URL = "https://n8n.kjserver.dev/webhook/mcu-tracker-feedb
  * feedback row is the thing that matters, so a webhook outage (n8n down,
  * network blip) must never fail the request or roll back the insert that
  * already succeeded. Errors are logged for visibility and swallowed.
+ *
+ * The webhook URL is public, so X-Webhook-Secret is what lets n8n tell this
+ * app's calls apart from anyone else posting to it. FEEDBACK_WEBHOOK_SECRET
+ * is a Worker secret (`wrangler secret put FEEDBACK_WEBHOOK_SECRET --env
+ * <env>`), not a wrangler.toml var, since the repo is public.
  */
 async function notifyFeedbackWebhook(env, { type, itemTitle, message, userId }) {
   try {
     const userRow = await env.DB.prepare("SELECT email FROM users WHERE id = ?").bind(userId).first();
 
+    const headers = { "content-type": "application/json" };
+    if (env.FEEDBACK_WEBHOOK_SECRET) {
+      headers["x-webhook-secret"] = env.FEEDBACK_WEBHOOK_SECRET;
+    } else {
+      console.error("FEEDBACK_WEBHOOK_SECRET is not set; feedback webhook sent unauthenticated");
+    }
+
     const res = await fetch(FEEDBACK_WEBHOOK_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({
         type,
         item_title: itemTitle ?? "None",

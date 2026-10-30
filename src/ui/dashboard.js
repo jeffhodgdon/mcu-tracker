@@ -354,7 +354,7 @@ function dashboardMain() {
     const perDay = t.remainingMinutes / days;
     $("stat-pace").textContent = formatRuntime(perDay) + "/day";
     $("stat-pace-note").textContent =
-      "To finish " + formatRuntime(t.remainingMinutes) + " in " + days + " days";
+      "To finish " + formatRuntime(t.remainingMinutes) + " in " + days + (days === 1 ? " day" : " days");
   }
 
   function renderCountdown() {
