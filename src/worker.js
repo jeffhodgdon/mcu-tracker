@@ -194,9 +194,39 @@ function notFoundPage() {
   });
 }
 
+/**
+ * Methods that never change state, so they skip the Origin check below. The
+ * OAuth start/callback routes are GET-only, which is what lets Google's
+ * redirect back (a top-level GET with no Origin) through.
+ */
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * CSRF guard for state-changing API calls. SameSite=Lax alone is not enough
+ * here: every *.kjserver.dev subdomain counts as the same site, so a bug on
+ * any sibling app could post a plain form here and the session cookie would
+ * ride along. Browsers always send Origin on cross-origin POST/PUT/DELETE, so
+ * a present-but-different Origin is rejected. An absent Origin is allowed —
+ * same-origin requests from some browsers, and non-browser clients like
+ * curl, which carry no ambient cookie to abuse anyway.
+ *
+ * Compared against the request's own origin rather than a fixed list, so
+ * prod accepts only mcu.kjserver.dev, dev only mcu-dev.kjserver.dev, and
+ * local `wrangler dev` keeps working.
+ */
+function isCrossOriginWrite(request, url) {
+  if (SAFE_METHODS.has(request.method.toUpperCase())) return false;
+  const origin = request.headers.get("Origin");
+  return origin !== null && origin !== url.origin;
+}
+
 async function handleApi(request, env, ctx, url) {
   const { pathname } = url;
   const method = request.method.toUpperCase();
+
+  if (isCrossOriginWrite(request, url)) {
+    return error("Cross-origin request rejected", 403, { "cache-control": PRIVATE_CACHE_CONTROL });
+  }
 
   // --- sign-in ------------------------------------------------------------
 
