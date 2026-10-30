@@ -633,7 +633,16 @@ function validateEpisodeInput(raw) {
   return { episode_number: episodeNumber, title, runtime_min: runtimeMin, is_estimate: isEstimate };
 }
 
-/** Replaces every episode of one item with the given list — delete then bulk insert. */
+/**
+ * Makes one item's episodes match the given list, matched by episode_number:
+ * existing episodes are updated in place, new numbers are inserted, and
+ * numbers no longer in the list are deleted.
+ *
+ * Updating in place (rather than delete-all-then-insert) is what keeps each
+ * episode's id stable — watch_status.episode_id points at episodes.id, so a
+ * fresh id would silently orphan every user's per-episode progress for the
+ * season on any admin edit, even a title fix.
+ */
 export async function handleAdminReplaceEpisodes(request, env, itemId) {
   if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
 
@@ -651,15 +660,48 @@ export async function handleAdminReplaceEpisodes(request, env, itemId) {
     throw err;
   }
 
+  // episode_number is the match key, so it must be unique within the request.
+  const incomingNumbers = new Set();
+  for (const ep of parsed) {
+    if (incomingNumbers.has(ep.episode_number)) {
+      return error(`Duplicate episode_number: ${ep.episode_number}`, 400);
+    }
+    incomingNumbers.add(ep.episode_number);
+  }
+
+  const { results: current } = await env.DB.prepare(
+    "SELECT id, episode_number FROM episodes WHERE item_id = ? ORDER BY id"
+  )
+    .bind(itemId)
+    .all();
+
+  // The table has no UNIQUE(item_id, episode_number), so legacy duplicates
+  // are possible: the oldest row for a number is the one kept and updated,
+  // any later duplicates are treated as removed.
+  const idByNumber = new Map();
+  const removedIds = [];
+  for (const row of current) {
+    if (incomingNumbers.has(row.episode_number) && !idByNumber.has(row.episode_number)) {
+      idByNumber.set(row.episode_number, row.id);
+    } else {
+      removedIds.push(row.id);
+    }
+  }
+
   const statements = [
-    env.DB.prepare("DELETE FROM episodes WHERE item_id = ?").bind(itemId),
-    ...parsed.map((ep) =>
-      env.DB.prepare(
-        "INSERT INTO episodes (item_id, episode_number, title, runtime_min, is_estimate) VALUES (?, ?, ?, ?, ?)"
-      ).bind(itemId, ep.episode_number, ep.title, ep.runtime_min, ep.is_estimate)
-    ),
+    ...removedIds.map((id) => env.DB.prepare("DELETE FROM episodes WHERE id = ?").bind(id)),
+    ...parsed.map((ep) => {
+      const id = idByNumber.get(ep.episode_number);
+      return id === undefined
+        ? env.DB.prepare(
+            "INSERT INTO episodes (item_id, episode_number, title, runtime_min, is_estimate) VALUES (?, ?, ?, ?, ?)"
+          ).bind(itemId, ep.episode_number, ep.title, ep.runtime_min, ep.is_estimate)
+        : env.DB.prepare(
+            "UPDATE episodes SET title = ?, runtime_min = ?, is_estimate = ? WHERE id = ?"
+          ).bind(ep.title, ep.runtime_min, ep.is_estimate, id);
+    }),
   ];
-  await env.DB.batch(statements);
+  if (statements.length) await env.DB.batch(statements);
 
   const { results } = await env.DB.prepare(
     `SELECT id, episode_number, title, runtime_min, is_estimate
