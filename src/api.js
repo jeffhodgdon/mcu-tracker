@@ -513,6 +513,9 @@ export async function handleGetWatchEpisodes(request, env, user, itemId) {
 /* --------------------------------------------------------------- watchlist */
 
 const WATCHLIST_SOURCES = SOURCES;
+// Above the whole catalogue (items + other_universes, ~160 rows), so the
+// dashboard picker's "select everything" still fits in one save.
+const WATCHLIST_SAVE_MAX = 200;
 
 async function selectWatchlist(env, userId) {
   const { results } = await env.DB.prepare(
@@ -533,10 +536,13 @@ export async function handlePostWatchlist(request, env, user) {
   if (!Array.isArray(body.items) || body.items.length === 0) {
     return error("items must be a non-empty array of { item_id, source }", 400);
   }
+  if (body.items.length > WATCHLIST_SAVE_MAX) {
+    return error(`items may contain at most ${WATCHLIST_SAVE_MAX} entries`, 400);
+  }
 
   const entries = [];
   for (const raw of body.items) {
-    if (raw === null || typeof raw !== "object") {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
       return error("Each item must be an object with item_id and source", 400);
     }
     const id = Number(raw.item_id);
@@ -607,6 +613,47 @@ const ADMIN_OTHER_FIELDS = new Set([
   "setting",
   "notes",
 ]);
+
+// NOT NULL text columns: an explicit null or blank must be a 400 here rather
+// than reaching the DB, where it would fail as a 500 (or, for null passed
+// through String(), be stored as the literal title "null").
+const ADMIN_REQUIRED_TEXT_FIELDS = new Set(["title", "type", "universe"]);
+
+/**
+ * Validates and normalizes one admin-editable column value. Shared by the
+ * create and patch handlers for both tables so they accept exactly the same
+ * input. Throws HttpError(400).
+ */
+function coerceAdminField(field, value) {
+  if (ADMIN_REQUIRED_TEXT_FIELDS.has(field)) {
+    const text = value === null || value === undefined ? "" : String(value).trim();
+    if (text === "") throw new HttpError(`${field} is required`, 400);
+    return text;
+  }
+  if (field === "is_estimate") return value ? 1 : 0;
+  if (value === null || value === undefined) return null;
+
+  if (field === "runtime_min") {
+    const n = Number(value);
+    if (!Number.isFinite(n)) throw new HttpError("runtime_min must be a number or null", 400);
+    return n;
+  }
+  if (field === "chrono_order") {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new HttpError("chrono_order must be a non-negative integer or null", 400);
+    }
+    return n;
+  }
+  if (field === "release_date") {
+    const date = String(value).trim();
+    if (!isCalendarDate(date) && !/^\d{4}-\d{2}(-00)?$/.test(date)) {
+      throw new HttpError("release_date must be a YYYY-MM-DD date or null", 400);
+    }
+    return date;
+  }
+  return String(value);
+}
 
 // Same "generic placeholder" rule shell.js's looksGeneric() uses client-side
 // for episode rows — kept in sync by hand since one runs in the Worker and
@@ -714,6 +761,9 @@ export async function handleAdminAudit(request, env) {
 /* --------------------------------------------------------- admin episodes */
 
 function validateEpisodeInput(raw) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new HttpError("Each episode must be an object", 400);
+  }
   const episodeNumber = Number(raw.episode_number);
   if (!Number.isInteger(episodeNumber) || episodeNumber < 1) {
     throw new HttpError("episode_number must be a positive integer", 400);
@@ -865,42 +915,11 @@ async function shiftChronoOrder(env, table, newOrder, excludeId) {
 export async function handleAdminCreateItem(request, env) {
   const body = await readJsonBody(request);
 
-  if (!Object.hasOwn(body, "title") || String(body.title).trim() === "") {
-    return error("title is required", 400);
-  }
-  if (!Object.hasOwn(body, "type") || String(body.type).trim() === "") {
-    return error("type is required", 400);
-  }
-  const title = String(body.title).trim();
-  const type = String(body.type).trim();
+  const title = coerceAdminField("title", body.title);
+  const type = coerceAdminField("type", body.type);
 
   const fields = Object.keys(body).filter((k) => ADMIN_ITEM_FIELDS.has(k) && k !== "title" && k !== "type");
-  const values = [];
-  for (const field of fields) {
-    let value = body[field];
-    if (field === "is_estimate") {
-      value = value ? 1 : 0;
-    } else if (field === "runtime_min" || field === "chrono_order") {
-      if (value !== null && value !== undefined) {
-        value = Number(value);
-        if (!Number.isFinite(value)) return error(`${field} must be a number or null`, 400);
-      } else {
-        value = null;
-      }
-    } else if (field === "release_date") {
-      if (value !== null && value !== undefined) {
-        value = String(value).trim();
-        if (!isCalendarDate(value) && !/^\d{4}-\d{2}(-00)?$/.test(value)) {
-          return error("release_date must be a YYYY-MM-DD date or null", 400);
-        }
-      } else {
-        value = null;
-      }
-    } else {
-      value = value === null || value === undefined ? null : String(value);
-    }
-    values.push(value);
-  }
+  const values = fields.map((field) => coerceAdminField(field, body[field]));
 
   const chronoOrderIdx = fields.indexOf("chrono_order");
   if (chronoOrderIdx !== -1) {
@@ -922,44 +941,13 @@ export async function handleAdminCreateItem(request, env) {
 export async function handleAdminCreateOtherUniverse(request, env) {
   const body = await readJsonBody(request);
 
-  if (!Object.hasOwn(body, "title") || String(body.title).trim() === "") {
-    return error("title is required", 400);
-  }
-  if (!Object.hasOwn(body, "universe") || String(body.universe).trim() === "") {
-    return error("universe is required", 400);
-  }
-  const title = String(body.title).trim();
-  const universe = String(body.universe).trim();
+  const title = coerceAdminField("title", body.title);
+  const universe = coerceAdminField("universe", body.universe);
 
   const fields = Object.keys(body).filter(
     (k) => ADMIN_OTHER_FIELDS.has(k) && k !== "title" && k !== "universe"
   );
-  const values = [];
-  for (const field of fields) {
-    let value = body[field];
-    if (field === "is_estimate") {
-      value = value ? 1 : 0;
-    } else if (field === "runtime_min" || field === "chrono_order") {
-      if (value !== null && value !== undefined) {
-        value = Number(value);
-        if (!Number.isFinite(value)) return error(`${field} must be a number or null`, 400);
-      } else {
-        value = null;
-      }
-    } else if (field === "release_date") {
-      if (value !== null && value !== undefined) {
-        value = String(value).trim();
-        if (!isCalendarDate(value) && !/^\d{4}-\d{2}(-00)?$/.test(value)) {
-          return error("release_date must be a YYYY-MM-DD date or null", 400);
-        }
-      } else {
-        value = null;
-      }
-    } else {
-      value = value === null || value === undefined ? null : String(value);
-    }
-    values.push(value);
-  }
+  const values = fields.map((field) => coerceAdminField(field, body[field]));
 
   const chronoOrderIdx = fields.indexOf("chrono_order");
   if (chronoOrderIdx !== -1) {
@@ -1033,32 +1021,7 @@ export async function handleAdminPatchItem(request, env, itemId, source) {
     .first();
   if (!exists) return error("No such item", 404);
 
-  const values = [];
-  for (const field of fields) {
-    let value = body[field];
-    if (field === "is_estimate") {
-      value = value ? 1 : 0;
-    } else if (field === "runtime_min" || field === "chrono_order") {
-      if (value !== null && value !== undefined) {
-        value = Number(value);
-        if (!Number.isFinite(value)) return error(`${field} must be a number or null`, 400);
-      } else {
-        value = null;
-      }
-    } else if (field === "release_date") {
-      if (value !== null && value !== undefined) {
-        value = String(value).trim();
-        if (!isCalendarDate(value) && !/^\d{4}-\d{2}(-00)?$/.test(value)) {
-          return error("release_date must be a YYYY-MM-DD date or null", 400);
-        }
-      } else {
-        value = null;
-      }
-    } else {
-      value = value === null || value === undefined ? null : String(value);
-    }
-    values.push(value);
-  }
+  const values = fields.map((field) => coerceAdminField(field, body[field]));
 
   // Only shift when chrono_order is actually moving to a new value — saving
   // the item unchanged (e.g. after an episode edit, see onEpisodeSave in

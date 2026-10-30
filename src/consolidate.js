@@ -35,13 +35,12 @@
  * each such item is kept as its own singleton group instead, disambiguated by
  * release date.
  *
- * Known divergence from the original Consolidated tab: a few of its
- * groupings reflect curated judgement no title-text rule can recover —
- * Marvel One-Shots bundles five differently-titled shorts, "Team Thor" also
- * absorbs "Team Darryl", and "Captain Marvel" absorbs "The Marvels". Fully
- * matching those would need a hand-authored mapping — a second source of
- * truth this page was explicitly asked not to have. See the Phase 3 report
- * for the measured mismatch count against consolidated.csv.
+ * A few of the original Consolidated tab's groupings reflect curated
+ * judgement no title-text rule can recover — Marvel One-Shots bundles
+ * differently-titled shorts, "Team Thor" also absorbs "Team Darryl", and
+ * "Captain Marvel" absorbs "The Marvels". Those are covered by
+ * GROUP_OVERRIDES below, a small id-keyed map that is applied before the
+ * text rules and touches only those items.
  */
 
 function stripLeadingThe(s) {

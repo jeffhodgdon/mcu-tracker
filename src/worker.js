@@ -4,11 +4,13 @@
  * Routing is per-subdomain (mcu / mcu-dev), so the Worker owns the whole
  * hostname and paths are relative to root — no route prefix to strip.
  *
- * There is no UI yet; anything outside /api/ returns a plain-text health
- * response that also reports whether the caller is signed in.
+ * /api/* is the JSON API; the page routes (/, /release, /admin, ...) serve
+ * the server-rendered UI from src/ui/; /health is a plain-text probe that
+ * also reports whether the caller is signed in. The scheduled handler runs
+ * the daily cron declared per environment in wrangler.toml.
  */
 
-import { authenticate, readCookie } from "./auth.js";
+import { authenticate, purgeExpiredSessions, readCookie } from "./auth.js";
 import {
   error,
   handleAdminAudit,
@@ -142,6 +144,12 @@ export default {
       console.error("unhandled error", err?.stack || String(err));
       return withSecurityHeaders(error("Internal error", 500));
     }
+  },
+
+  // Daily cron (wrangler.toml triggers). authenticate() already ignores
+  // expired rows, so this is only housekeeping to keep the table bounded.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(purgeExpiredSessions(env));
   },
 };
 

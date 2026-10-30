@@ -1,8 +1,8 @@
 /**
  * Formatting helpers shared by the server and, via inlining, the browser.
  *
- * These are real exports so they can be unit tested directly; the page shell
- * serialises them into the client bundle with Function.prototype.toString().
+ * These are real module exports; shell.js imports them and serialises them
+ * into the client bundle with Function.prototype.toString().
  */
 
 /**

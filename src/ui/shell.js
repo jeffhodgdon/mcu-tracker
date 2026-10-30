@@ -5,8 +5,8 @@
  * Pages are static HTML and fetch their data from the existing JSON API. The
  * helpers below are serialised into the page with Function.prototype.toString()
  * rather than being retyped as strings, so the browser runs exactly the code
- * that format.js unit tests cover — there is no second implementation of the
- * runtime formatting to drift out of sync.
+ * in format.js — there is no second implementation of the runtime formatting
+ * to drift out of sync.
  *
  * Two things Wrangler's esbuild bundling does to that source text before we
  * ever see it, both handled by reflect()/normalizeNames() below:

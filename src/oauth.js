@@ -81,13 +81,18 @@ async function verifyStateCookie(cookieValue, secret) {
   const state = cookieValue.slice(0, dot);
   const provided = cookieValue.slice(dot + 1);
 
+  // The cookie is client-controlled: a tampered signature that is not valid
+  // base64 makes atob throw, which must read as "invalid state" (400), not
+  // escape as an unhandled 500.
+  let signature;
+  try {
+    signature = b64urlDecode(provided);
+  } catch {
+    return null;
+  }
+
   const key = await hmacKey(secret);
-  const ok = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    b64urlDecode(provided),
-    new TextEncoder().encode(state)
-  );
+  const ok = await crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(state));
   return ok ? state : null;
 }
 
@@ -165,6 +170,7 @@ export async function verifyIdToken(idToken, clientId) {
   if (typeof claims.iat === "number" && claims.iat - CLOCK_SKEW_SECONDS > now) {
     throw new Error("ID token was issued in the future");
   }
+  if (typeof claims.sub !== "string" || !claims.sub) throw new Error("ID token carries no subject");
   if (!claims.email) throw new Error("ID token carries no email address");
   if (claims.email_verified === false) {
     throw new Error("Google has not verified this email address");
@@ -279,7 +285,10 @@ export async function handleGoogleCallback(request, env, url, readCookie) {
 
   // --- find or create the user --------------------------------------------
   const email = normalizeEmail(claims.email);
-  const userId = await findOrCreateUser(env, email);
+  const userId = await findOrCreateUser(env, claims.sub, email);
+  if (!userId) {
+    return failure("This email address is already linked to a different Google account", 409);
+  }
 
   // Only the session this browser already held is invalidated before a fresh
   // one is minted — session fixation protection for this browser — while
@@ -303,32 +312,72 @@ export async function handleGoogleCallback(request, env, url, readCookie) {
 }
 
 /**
- * First Google sign-in for an address creates the account; there is no
- * separate signup step. The UNIQUE index on users.email is the authority on
- * duplicates, so a concurrent first login for the same address resolves to a
- * single row rather than racing.
+ * Accounts are keyed on Google's stable account id (the ID token's `sub`),
+ * not the email address, so a user who changes their Google email keeps
+ * their account. First sign-in creates the account; there is no separate
+ * signup step.
+ *
+ * Accounts created before google_id existed are matched once by email and
+ * claimed by setting their google_id. That fallback only considers rows with
+ * no google_id yet: an account already bound to one Google account must
+ * never be handed to a different one that now holds the same address.
+ *
+ * The UNIQUE indexes on users.email and users.google_id are the authority on
+ * duplicates, so a concurrent first login resolves to a single row. Returns
+ * null when the address is taken by an account bound to another Google id.
  */
-async function findOrCreateUser(env, email) {
-  const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?")
+async function findOrCreateUser(env, googleId, email) {
+  const byGoogleId = await env.DB.prepare("SELECT id, email FROM users WHERE google_id = ?")
+    .bind(googleId)
+    .first();
+  if (byGoogleId) {
+    if (byGoogleId.email !== email) await updateUserEmail(env, byGoogleId.id, email);
+    return byGoogleId.id;
+  }
+
+  const legacy = await env.DB.prepare("SELECT id FROM users WHERE email = ? AND google_id IS NULL")
     .bind(email)
     .first();
-  if (existing) return existing.id;
+  if (legacy) {
+    await env.DB.prepare("UPDATE users SET google_id = ? WHERE id = ? AND google_id IS NULL")
+      .bind(googleId, legacy.id)
+      .run();
+    return legacy.id;
+  }
 
   try {
     const created = await env.DB.prepare(
-      "INSERT INTO users (email) VALUES (?) RETURNING id"
+      "INSERT INTO users (email, google_id) VALUES (?, ?) RETURNING id"
     )
-      .bind(email)
+      .bind(email, googleId)
       .first();
     return created.id;
   } catch (err) {
     if (String(err.message || "").includes("UNIQUE")) {
-      const row = await env.DB.prepare("SELECT id FROM users WHERE email = ?")
-        .bind(email)
+      const row = await env.DB.prepare("SELECT id FROM users WHERE google_id = ?")
+        .bind(googleId)
         .first();
       if (row) return row.id;
+      // Not a race: the address belongs to an account bound to a different
+      // Google account (e.g. a recycled Workspace address).
+      return null;
     }
     throw err;
+  }
+}
+
+/**
+ * Keeps the stored address in step with the Google account, so the UI shows
+ * the current one and the old address is freed for whoever holds it next.
+ * Best effort: if another account row already has the new address, the
+ * sign-in still succeeds on the old one.
+ */
+async function updateUserEmail(env, userId, email) {
+  try {
+    await env.DB.prepare("UPDATE users SET email = ? WHERE id = ?").bind(email, userId).run();
+  } catch (err) {
+    if (!String(err.message || "").includes("UNIQUE")) throw err;
+    console.error("could not update email for user", userId, "- address already in use");
   }
 }
 
