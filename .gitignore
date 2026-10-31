@@ -30,6 +30,13 @@ Thumbs.db
 .continue/
 .continue/
 .continue/
-seed/dev-snapshot*.sql
+
+# Database exports, never commit: a snapshot holds every user's email, live
+# session ids and watch history. Export outside the repo (see NOTES.md); these
+# catch any that land here anyway. /*.sql is root-only, so seed/ and
+# migrations/ stay tracked.
+seed/*snapshot*.sql
+/*.sql
+
 *.csv
 *.Zone.Identifier

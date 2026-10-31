@@ -26,7 +26,10 @@ const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs";
 const GOOGLE_ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
 
-const STATE_COOKIE = "mcu_oauth_state";
+// __Host- for the same reason as SESSION_COOKIE (auth.js): a sibling
+// subdomain must not be able to plant a state cookie and complete a sign-in
+// into an account of its choosing (login CSRF).
+const STATE_COOKIE = "__Host-mcu_oauth_state";
 const STATE_TTL_SECONDS = 600; // 10 minutes to complete the consent screen
 const CLOCK_SKEW_SECONDS = 60;
 
@@ -172,7 +175,9 @@ export async function verifyIdToken(idToken, clientId) {
   }
   if (typeof claims.sub !== "string" || !claims.sub) throw new Error("ID token carries no subject");
   if (!claims.email) throw new Error("ID token carries no email address");
-  if (claims.email_verified === false) {
+  // Required, not merely "not false": a token that omits the claim must not
+  // be able to sign in to an account matched by that address.
+  if (claims.email_verified !== true) {
     throw new Error("Google has not verified this email address");
   }
 
@@ -233,22 +238,21 @@ export async function handleGoogleCallback(request, env, url, readCookie) {
   // Google reports user-facing failures (e.g. consent denied) in the query.
   const oauthError = url.searchParams.get("error");
   if (oauthError) {
-    return failure(`Google sign-in was cancelled or refused (${oauthError})`, 400);
+    // Not echoed: the query string is attacker-controlled, and reflecting it
+    // would let any link put arbitrary text on this domain.
+    return failure(SIGN_IN_CANCELLED, 400, `google returned error=${oauthError.slice(0, 100)}`);
   }
 
   const code = url.searchParams.get("code");
   const returnedState = url.searchParams.get("state");
-  if (!code) return failure("Google did not return an authorization code", 400);
+  if (!code) return failure(SIGN_IN_FAILED, 400, "callback has no authorization code");
 
   const expectedState = await verifyStateCookie(readCookie(request, STATE_COOKIE), clientSecret);
   if (!expectedState) {
-    return failure(
-      "Sign-in state cookie missing or invalid — start again at /api/auth/google",
-      400
-    );
+    return failure(SIGN_IN_EXPIRED, 400, "state cookie missing or signature invalid");
   }
   if (!returnedState || returnedState !== expectedState) {
-    return failure("Sign-in state did not match — request rejected", 400);
+    return failure(SIGN_IN_EXPIRED, 400, "returned state does not match the state cookie");
   }
 
   // --- exchange the code for tokens, server side ---------------------------
@@ -268,26 +272,28 @@ export async function handleGoogleCallback(request, env, url, readCookie) {
     const detail = await tokenRes.text();
     // Surfaces redirect_uri_mismatch and invalid_client, which are the two
     // misconfigurations worth seeing directly rather than as a generic 500.
-    console.error("google token exchange failed", tokenRes.status, detail.slice(0, 500));
-    return failure(`Token exchange with Google failed (${tokenRes.status})`, 502);
+    return failure(SIGN_IN_FAILED, 502, `token exchange failed (${tokenRes.status}): ${detail.slice(0, 500)}`);
   }
 
   const tokens = await tokenRes.json();
-  if (!tokens.id_token) return failure("Google's response contained no ID token", 502);
+  if (!tokens.id_token) return failure(SIGN_IN_FAILED, 502, "token response has no id_token");
 
   let claims;
   try {
     claims = await verifyIdToken(tokens.id_token, clientId);
   } catch (err) {
-    console.error("id token verification failed", err.message);
-    return failure(`Could not verify Google's ID token: ${err.message}`, 401);
+    return failure(SIGN_IN_FAILED, 401, `id token verification failed: ${err.message}`);
   }
 
   // --- find or create the user --------------------------------------------
   const email = normalizeEmail(claims.email);
   const userId = await findOrCreateUser(env, claims.sub, email);
   if (!userId) {
-    return failure("This email address is already linked to a different Google account", 409);
+    return failure(
+      SIGN_IN_FAILED,
+      409,
+      `no account for google_id ${claims.sub}: address already bound to another Google account, or a concurrent claim took it`
+    );
   }
 
   // Only the session this browser already held is invalidated before a fresh
@@ -339,10 +345,21 @@ async function findOrCreateUser(env, googleId, email) {
     .bind(email)
     .first();
   if (legacy) {
-    await env.DB.prepare("UPDATE users SET google_id = ? WHERE id = ? AND google_id IS NULL")
+    const claim = await env.DB.prepare(
+      "UPDATE users SET google_id = ? WHERE id = ? AND google_id IS NULL"
+    )
       .bind(googleId, legacy.id)
       .run();
-    return legacy.id;
+    if (claim.meta.changes === 1) return legacy.id;
+
+    // The row was claimed between the SELECT above and this UPDATE. If it was
+    // claimed by this same Google account (a concurrent sign-in of our own),
+    // that row is ours; otherwise it now belongs to someone else and must not
+    // be handed over, so this sign-in fails.
+    const row = await env.DB.prepare("SELECT id FROM users WHERE google_id = ?")
+      .bind(googleId)
+      .first();
+    return row ? row.id : null;
   }
 
   try {
@@ -381,9 +398,20 @@ async function updateUserEmail(env, userId, email) {
   }
 }
 
-/** Plain-text so a failure mid-redirect is readable in the browser. */
-function failure(message, status) {
-  return new Response(`Google sign-in failed: ${message}\n`, {
+// What the user sees. Deliberately generic: the specific reason (Google's
+// error code, why a token failed verification, account-matching details) goes
+// to the Worker log only, where it is useful and not exposed to the caller.
+const SIGN_IN_FAILED = "Sign-in with Google failed. Please try again.";
+const SIGN_IN_CANCELLED = "Sign-in with Google was cancelled.";
+const SIGN_IN_EXPIRED = "Your sign-in attempt expired or was not valid. Please start again.";
+
+/**
+ * Plain-text so a failure mid-redirect is readable in the browser. `message`
+ * is one of the generic constants above; `detail` is logged, never returned.
+ */
+function failure(message, status, detail) {
+  console.error("google sign-in failed:", detail || message);
+  return new Response(`${message}\n`, {
     status,
     headers: {
       "content-type": "text/plain; charset=utf-8",

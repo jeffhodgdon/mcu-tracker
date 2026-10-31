@@ -1532,7 +1532,8 @@ function dashboardMain() {
       const [items, watch, settings, otherUniverses, watchlist, consolidated] = await Promise.all([
         apiGet("/api/items"),
         apiGet("/api/watch-status"),
-        apiGet("/api/settings"),
+        // initSignedInLabel already fetched these; only refetch if that failed.
+        me.settings ? { data: { settings: me.settings } } : apiGet("/api/settings"),
         apiGet("/api/other-universes"),
         apiGet("/api/watchlist"),
         apiGet("/api/consolidated"),

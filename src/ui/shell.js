@@ -466,6 +466,11 @@ async function initSignedInLabel() {
     }),
   ]);
 
+  // Handed back on `me` so a page that needs the full settings (the
+  // dashboard's countdown and sort) reuses this response instead of fetching
+  // /api/settings a second time. null when signed out or the fetch failed.
+  me.settings = me.signedIn && settings && settings.data ? settings.data.settings : null;
+
   try {
     // The nav rail is duplicated into the mobile drawer (shell.js's markup),
     // so every "whoami"/"nav-admin" target is a class shared by both copies

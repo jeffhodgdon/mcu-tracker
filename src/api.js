@@ -77,21 +77,62 @@ export function error(message, status = 400, headers = {}) {
   return json({ error: message }, status, headers);
 }
 
+// Far above any real request (the largest, a 200-entry watch list save or a
+// 100-episode admin save, is ~15 KB) and far below what would strain a
+// Worker's memory if parsed.
+const MAX_JSON_BODY_BYTES = 64 * 1024;
+
+/**
+ * Reads at most MAX_JSON_BODY_BYTES of the body, or throws 413. A declared
+ * Content-Length over the cap is refused before reading anything; without
+ * one (chunked uploads), the stream is counted as it arrives and abandoned
+ * the moment it passes the cap, so an oversized body is never held in full.
+ */
+async function readBodyText(request) {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && Number(declared) > MAX_JSON_BODY_BYTES) {
+    throw new HttpError(`Request body must be ${MAX_JSON_BODY_BYTES / 1024} KB or smaller`, 413);
+  }
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_JSON_BODY_BYTES) {
+      await reader.cancel();
+      throw new HttpError(`Request body must be ${MAX_JSON_BODY_BYTES / 1024} KB or smaller`, 413);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 async function readJsonBody(request) {
   const type = request.headers.get("content-type") || "";
   if (!type.includes("application/json")) {
     throw new HttpError("Expected content-type: application/json", 415);
   }
+  const text = await readBodyText(request);
+  let body;
   try {
-    const body = await request.json();
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      throw new HttpError("Request body must be a JSON object", 400);
-    }
-    return body;
-  } catch (err) {
-    if (err instanceof HttpError) throw err;
+    body = JSON.parse(text);
+  } catch {
     throw new HttpError("Request body is not valid JSON", 400);
   }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new HttpError("Request body must be a JSON object", 400);
+  }
+  return body;
 }
 
 export class HttpError extends Error {
@@ -125,10 +166,18 @@ export async function handleListItems(request, env) {
       ORDER BY id`
   ).all();
 
-  return json({
-    items: results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 })),
-  });
+  // Identical for every caller and changes only on admin edits, so browsers
+  // may reuse it for 5 minutes across page loads. Tradeoff: an admin edit,
+  // add or delete can take up to that long to reach a visitor who already
+  // has it cached (the admin page itself reads /api/admin/items, uncached).
+  return json(
+    { items: results.map((r) => ({ ...r, is_estimate: r.is_estimate === 1 })) },
+    200,
+    { "cache-control": ITEMS_CACHE_CONTROL }
+  );
 }
+
+const ITEMS_CACHE_CONTROL = "public, max-age=300";
 
 /**
  * Franchises collapsed to one row each: entry count, first release date, and
@@ -309,6 +358,13 @@ function parseWatchUpdate(raw) {
   const episodeId = hasEpisodeId ? Number(raw.episode_id) : 0;
   if (!Number.isInteger(episodeId) || episodeId < 0) {
     throw new HttpError("episode_id must be a positive integer or null", 400);
+  }
+  // Episodes belong to MCU items only (episodes.item_id references items.id).
+  // Without this, an Other Universes id that happens to equal an MCU season's
+  // id would pass the "episode belongs to this item" check and store a junk
+  // per-episode row against the Other Universes item.
+  if (source === "other" && episodeId !== 0) {
+    throw new HttpError('episode_id must be 0 or null for source "other"', 400);
   }
 
   if (!Object.hasOwn(raw, "status")) throw new HttpError("status is required", 400);
@@ -704,6 +760,33 @@ const ADMIN_OTHER_FIELDS = new Set([
 // through String(), be stored as the literal title "null").
 const ADMIN_REQUIRED_TEXT_FIELDS = new Set(["title", "type", "universe"]);
 
+// Free-text columns with a length cap. The longest real values are ~80
+// characters, so 200 leaves headroom while keeping a mistaken paste out.
+const ADMIN_CAPPED_TEXT_FIELDS = new Set(["title", "universe", "setting", "notes", "crossover_universe"]);
+const ADMIN_TEXT_MAX = 200;
+
+// The same six the admin form's Type dropdown offers; the UI groups and
+// badges by these exact strings, so anything else would render ungrouped.
+const ITEM_TYPES = new Set([
+  "Film",
+  "TV Series",
+  "One-Shot",
+  "Special Presentation",
+  "Marvel Television",
+  "Animated Series",
+]);
+
+// Comfortably above the longest season (10 episodes), and keeps one save's
+// D1 batch small.
+const ADMIN_EPISODES_MAX = 100;
+
+function checkTextLength(field, text) {
+  if (ADMIN_CAPPED_TEXT_FIELDS.has(field) && text.length > ADMIN_TEXT_MAX) {
+    throw new HttpError(`${field} must be ${ADMIN_TEXT_MAX} characters or fewer`, 400);
+  }
+  return text;
+}
+
 /**
  * Validates and normalizes one admin-editable column value. Shared by the
  * create and patch handlers for both tables so they accept exactly the same
@@ -713,14 +796,19 @@ function coerceAdminField(field, value) {
   if (ADMIN_REQUIRED_TEXT_FIELDS.has(field)) {
     const text = value === null || value === undefined ? "" : String(value).trim();
     if (text === "") throw new HttpError(`${field} is required`, 400);
-    return text;
+    if (field === "type" && !ITEM_TYPES.has(text)) {
+      throw new HttpError(`type must be one of: ${[...ITEM_TYPES].join(", ")}`, 400);
+    }
+    return checkTextLength(field, text);
   }
   if (field === "is_estimate") return value ? 1 : 0;
   if (value === null || value === undefined) return null;
 
   if (field === "runtime_min") {
     const n = Number(value);
-    if (!Number.isFinite(n)) throw new HttpError("runtime_min must be a number or null", 400);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new HttpError("runtime_min must be a non-negative number or null", 400);
+    }
     return n;
   }
   if (field === "chrono_order") {
@@ -737,7 +825,7 @@ function coerceAdminField(field, value) {
     }
     return date;
   }
-  return String(value);
+  return checkTextLength(field, String(value));
 }
 
 // Same "generic placeholder" rule shell.js's looksGeneric() uses client-side
@@ -858,7 +946,9 @@ function validateEpisodeInput(raw) {
   let runtimeMin = null;
   if (raw.runtime_min !== null && raw.runtime_min !== undefined && raw.runtime_min !== "") {
     runtimeMin = Number(raw.runtime_min);
-    if (!Number.isFinite(runtimeMin)) throw new HttpError("runtime_min must be a number or null", 400);
+    if (!Number.isFinite(runtimeMin) || runtimeMin < 0) {
+      throw new HttpError("runtime_min must be a non-negative number or null", 400);
+    }
   }
 
   const isEstimate = raw.is_estimate ? 1 : 0;
@@ -881,6 +971,9 @@ export async function handleAdminReplaceEpisodes(request, env, itemId) {
 
   const body = await readJsonBody(request);
   if (!Array.isArray(body.episodes)) return error("episodes must be an array", 400);
+  if (body.episodes.length > ADMIN_EPISODES_MAX) {
+    return error(`episodes may contain at most ${ADMIN_EPISODES_MAX} entries`, 400);
+  }
 
   const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?").bind(itemId).first();
   if (!exists) return error("No such item", 404);
@@ -1005,11 +1098,53 @@ function shiftChronoOrderStatement(env, table, newOrder, excludeId) {
 }
 
 /**
- * Runs an optional chrono shift and the item write as one D1 batch and
- * returns the item write's result (the last statement's).
+ * Statements that keep chrono positions consecutive when an existing row's
+ * chrono_order changes from `oldOrder` to `newOrder` (either may be null).
+ * They run in the same batch as the row's own UPDATE and exclude the row
+ * itself, which gets `newOrder` from that UPDATE:
+ *   placed (null -> N):  make room at N (shiftChronoOrderStatement)
+ *   unplaced (O -> null): close the gap at O
+ *   moved later (O -> N, N > O): rows in (O, N] move up one place
+ *   moved earlier (N < O): rows in [N, O) move down one place
+ * A move to a position past the current end still leaves a gap there; the
+ * value the admin typed is stored as given.
+ */
+function chronoMoveStatements(env, table, oldOrder, newOrder, itemId) {
+  const hasOld = oldOrder !== null && oldOrder !== undefined;
+  const hasNew = newOrder !== null && newOrder !== undefined;
+  if (oldOrder === newOrder || (!hasOld && !hasNew)) return [];
+  if (!hasOld) return [shiftChronoOrderStatement(env, table, newOrder, itemId)];
+  if (!hasNew) return [closeChronoGapStatement(env, table, oldOrder, itemId)];
+  if (newOrder > oldOrder) {
+    return [
+      env.DB.prepare(
+        `UPDATE ${table} SET chrono_order = chrono_order - 1
+          WHERE chrono_order > ? AND chrono_order <= ? AND id != ?`
+      ).bind(oldOrder, newOrder, itemId),
+    ];
+  }
+  return [
+    env.DB.prepare(
+      `UPDATE ${table} SET chrono_order = chrono_order + 1
+        WHERE chrono_order >= ? AND chrono_order < ? AND id != ?`
+    ).bind(newOrder, oldOrder, itemId),
+  ];
+}
+
+/** Moves every row after `oldOrder` up one place, for a row leaving that slot. */
+function closeChronoGapStatement(env, table, oldOrder, itemId) {
+  return env.DB.prepare(
+    `UPDATE ${table} SET chrono_order = chrono_order - 1 WHERE chrono_order > ? AND id != ?`
+  ).bind(oldOrder, itemId);
+}
+
+/**
+ * Runs the chrono statements and the item write as one D1 batch, so they
+ * succeed or fail together, and returns the item write's result (the last).
  */
 async function batchWithShift(env, shift, write) {
-  const results = await env.DB.batch(shift ? [shift, write] : [write]);
+  const before = Array.isArray(shift) ? shift : shift ? [shift] : [];
+  const results = await env.DB.batch([...before, write]);
   return results[results.length - 1];
 }
 
@@ -1079,7 +1214,7 @@ export async function handleAdminCreateOtherUniverse(request, env) {
 export async function handleAdminDeleteItem(request, env, itemId) {
   if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
 
-  const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?").bind(itemId).first();
+  const exists = await env.DB.prepare("SELECT chrono_order FROM items WHERE id = ?").bind(itemId).first();
   if (!exists) return error("No such item", 404);
 
   // The watch_status delete also covers every per-episode row for this item:
@@ -1090,6 +1225,8 @@ export async function handleAdminDeleteItem(request, env, itemId) {
     env.DB.prepare("DELETE FROM watchlist WHERE item_id = ? AND source = 'mcu'").bind(itemId),
     env.DB.prepare("DELETE FROM episodes WHERE item_id = ?").bind(itemId),
     env.DB.prepare("DELETE FROM items WHERE id = ?").bind(itemId),
+    // Same batch, so the positions after it close up only if the delete lands.
+    ...(exists.chrono_order === null ? [] : [closeChronoGapStatement(env, "items", exists.chrono_order, itemId)]),
   ]);
 
   return privateJson({ ok: true });
@@ -1099,7 +1236,7 @@ export async function handleAdminDeleteItem(request, env, itemId) {
 export async function handleAdminDeleteOtherUniverse(request, env, itemId) {
   if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
 
-  const exists = await env.DB.prepare("SELECT 1 AS ok FROM other_universes WHERE id = ?")
+  const exists = await env.DB.prepare("SELECT chrono_order FROM other_universes WHERE id = ?")
     .bind(itemId)
     .first();
   if (!exists) return error("No such item", 404);
@@ -1108,6 +1245,9 @@ export async function handleAdminDeleteOtherUniverse(request, env, itemId) {
     env.DB.prepare("DELETE FROM watch_status WHERE item_id = ? AND source = 'other'").bind(itemId),
     env.DB.prepare("DELETE FROM watchlist WHERE item_id = ? AND source = 'other'").bind(itemId),
     env.DB.prepare("DELETE FROM other_universes WHERE id = ?").bind(itemId),
+    ...(exists.chrono_order === null
+      ? []
+      : [closeChronoGapStatement(env, "other_universes", exists.chrono_order, itemId)]),
   ]);
 
   return privateJson({ ok: true });
@@ -1136,14 +1276,14 @@ export async function handleAdminPatchItem(request, env, itemId, source) {
 
   const values = fields.map((field) => coerceAdminField(field, body[field]));
 
-  // Only shift when chrono_order is actually moving to a new value — saving
-  // the item unchanged (e.g. after an episode edit, see onEpisodeSave in
-  // admin.js) must not bump every row below it on every save.
+  // Only touches other rows when chrono_order actually changes — saving the
+  // item unchanged (e.g. after an episode edit, see onEpisodeSave in
+  // admin.js) must not move anything. chronoMoveStatements returns [] then.
   const chronoOrderIdx = fields.indexOf("chrono_order");
   const shift =
-    chronoOrderIdx !== -1 && values[chronoOrderIdx] !== exists.chrono_order
-      ? shiftChronoOrderStatement(env, table, values[chronoOrderIdx], itemId)
-      : null;
+    chronoOrderIdx === -1
+      ? []
+      : chronoMoveStatements(env, table, exists.chrono_order, values[chronoOrderIdx], itemId);
 
   const setClause = fields.map((f) => `${f} = ?`).join(", ");
   await batchWithShift(
@@ -1301,29 +1441,26 @@ export async function handleSubmitFeedback(request, env, user) {
     if (!Number.isInteger(itemId) || itemId < 1) {
       return error("item_id must be a positive integer or null", 400);
     }
-    // item_id may point at either items.id or other_universes.id (the two
-    // id spaces are independent — see the source flag other.js/api.js use
-    // elsewhere), so a miss on items falls back to other_universes before
-    // treating the id as genuinely unknown.
+    // The Settings item picker only offers MCU catalogue items (/api/items),
+    // and feedback.item_id carries no source, so it is always an items.id.
     const item = await env.DB.prepare("SELECT title FROM items WHERE id = ?").bind(itemId).first();
-    if (item) {
-      itemTitle = item.title;
-    } else {
-      const otherItem = await env.DB.prepare("SELECT title FROM other_universes WHERE id = ?")
-        .bind(itemId)
-        .first();
-      itemTitle = otherItem ? otherItem.title : "Unknown item";
-    }
+    itemTitle = item ? item.title : "Unknown item";
   }
 
+  // The rate-limit check and the insert are one statement, so concurrent
+  // submissions cannot each pass a separate count and all get in: D1 runs
+  // writes one at a time, and each sees the rows the previous one added.
   // created_at is written by datetime('now'), so comparing against the same
   // SQLite clock keeps the window exact regardless of the Worker's own time.
-  const recent = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM feedback WHERE user_id = ? AND created_at > datetime('now', '-1 hour')"
+  const inserted = await env.DB.prepare(
+    `INSERT INTO feedback (user_id, type, item_id, message)
+     SELECT ?, ?, ?, ?
+      WHERE (SELECT COUNT(*) FROM feedback
+              WHERE user_id = ? AND created_at > datetime('now', '-1 hour')) < ?`
   )
-    .bind(user.user_id)
-    .first();
-  if (recent.n >= FEEDBACK_LIMIT_PER_HOUR) {
+    .bind(user.user_id, type, itemId, message, user.user_id, FEEDBACK_LIMIT_PER_HOUR)
+    .run();
+  if (inserted.meta.changes === 0) {
     return error(
       "You've submitted too much feedback recently. Please wait before submitting again.",
       429,
@@ -1331,12 +1468,7 @@ export async function handleSubmitFeedback(request, env, user) {
     );
   }
 
-  await env.DB.prepare(
-    "INSERT INTO feedback (user_id, type, item_id, message) VALUES (?, ?, ?, ?)"
-  )
-    .bind(user.user_id, type, itemId, message)
-    .run();
-
+  // Only reached when a row was actually stored.
   await notifyFeedbackWebhook(env, { type, itemTitle, message, userId: user.user_id });
 
   return privateJson({ ok: true });

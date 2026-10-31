@@ -7,7 +7,11 @@
  * need no knowledge of OAuth.
  */
 
-export const SESSION_COOKIE = "mcu_session";
+// The __Host- prefix makes the browser refuse this cookie unless it is Secure,
+// Path=/ and has no Domain, so a sibling *.kjserver.dev site can never plant
+// or overwrite it (cookie tossing / session fixation). sessionCookie() and
+// clearedSessionCookie() below already meet all three conditions.
+export const SESSION_COOKIE = "__Host-mcu_session";
 export const SESSION_TTL_DAYS = 30;
 
 /* -------------------------------------------------------------- identities */
