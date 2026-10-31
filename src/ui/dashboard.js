@@ -857,24 +857,46 @@ function dashboardMain() {
     }
   }
 
+  // The server's per-request cap on /api/watch/episodes/bulk item_ids.
+  const EPISODES_BULK_MAX = 100;
+
   // Warms EPISODE_CACHE for every TV season on the watch list right after
   // load, then immediately reflects each one's remaining runtime on its
   // season row — without this, a season row shows its full runtime until the
   // user happens to expand it or toggle an episode checkbox.
+  //
+  // One bulk request for all of them (split only past the server's 100-id
+  // cap) rather than loadEpisodeData's two requests per season. Expanding a
+  // row still goes through loadEpisodeData, which finds these entries cached.
   async function prefetchWatchlistEpisodeRuntimes() {
-    const tvEntries = state.watchlist.filter((entry) => {
-      if (entry.source !== "mcu") return false;
-      const item = findItem(entry.source, entry.item_id);
-      return item && TV_TYPES.indexOf(item.type) !== -1;
-    });
+    const ids = state.watchlist
+      .filter((entry) => {
+        if (entry.source !== "mcu") return false;
+        const item = findItem(entry.source, entry.item_id);
+        return item && TV_TYPES.indexOf(item.type) !== -1;
+      })
+      .map((entry) => entry.item_id)
+      .filter((id) => !cachedEpisodes("mcu", id));
+
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += EPISODES_BULK_MAX) {
+      chunks.push(ids.slice(i, i + EPISODES_BULK_MAX));
+    }
 
     await Promise.all(
-      tvEntries.map(async (entry) => {
+      chunks.map(async (chunk) => {
         try {
-          await loadEpisodeData(entry.item_id);
-          updateSeasonRowRuntimeFromCache(entry.item_id);
+          const res = await apiGet("/api/watch/episodes/bulk?item_ids=" + chunk.join(","));
+          const byItem = (res.data && res.data.items) || {};
+          for (const id of chunk) {
+            // A row expanded (and maybe toggled) while this was in flight has
+            // newer data in the cache than this response; keep that.
+            if (cachedEpisodes("mcu", id) || !byItem[id]) continue;
+            cacheEpisodeData(id, byItem[id].episodes, byItem[id].watch_status);
+            updateSeasonRowRuntimeFromCache(id);
+          }
         } catch (e) {
-          // Best-effort — leave the row showing the season's full runtime.
+          // Best-effort — leave these rows showing the season's full runtime.
         }
       })
     );

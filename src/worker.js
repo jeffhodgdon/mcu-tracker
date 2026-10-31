@@ -30,6 +30,7 @@ import {
   handleGetSettings,
   handleGetStats,
   handleGetWatchEpisodes,
+  handleGetWatchEpisodesBulk,
   handleGetWatchlist,
   handleGetWatchStatus,
   handleListItems,
@@ -361,6 +362,12 @@ async function handleApi(request, env, ctx, url) {
     const itemId = Number(url.searchParams.get("item_id"));
     if (!Number.isInteger(itemId) || itemId < 1) return error("Invalid item id", 400);
     return handleGetWatchEpisodes(request, env, user, itemId);
+  }
+
+  if (pathname === "/api/watch/episodes/bulk") {
+    if (method !== "GET") return methodNotAllowed("GET");
+    if (!user) return unauthorized();
+    return handleGetWatchEpisodesBulk(request, env, user, url);
   }
 
   const watchMatch = /^\/api\/watch-status\/(.+)$/.exec(pathname);

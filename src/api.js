@@ -376,6 +376,30 @@ async function selectWhereIdIn(env, sql, ids) {
   return results;
 }
 
+// D1 rejects a statement with more than 100 bound parameters.
+const D1_MAX_BOUND_PARAMS = 100;
+
+/**
+ * selectWhereIdIn for any number of ids: splits them across as many queries
+ * as needed so each stays within D1's bound-parameter limit, counting the
+ * `leading` parameters bound ahead of the IN list (e.g. a user_id). Rows come
+ * back unordered across chunks, so `sql` must not rely on ORDER BY.
+ */
+async function selectWhereIdInChunked(env, sql, ids, leading = []) {
+  const perQuery = D1_MAX_BOUND_PARAMS - leading.length;
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += perQuery) chunks.push(ids.slice(i, i + perQuery));
+  const parts = await Promise.all(
+    chunks.map(async (chunk) => {
+      const { results } = await env.DB.prepare(`${sql} (${chunk.map(() => "?").join(", ")})`)
+        .bind(...leading, ...chunk)
+        .all();
+      return results;
+    })
+  );
+  return parts.flat();
+}
+
 /**
  * Many watch-status changes in one request — e.g. a season status change,
  * which sends the season-level row (episode_id 0) together with every one of
@@ -455,6 +479,78 @@ export async function handleGetWatchEpisodes(request, env, user, itemId) {
   return privateJson({ watch_status: results });
 }
 
+// Matches the dashboard's need (every TV season on a watch list, ~60 in the
+// whole catalogue) with room to spare; the client splits anything larger.
+const EPISODES_BULK_MAX = 100;
+
+/**
+ * Episodes plus the signed-in user's episode-level statuses for many MCU
+ * items at once — GET /api/watch/episodes/bulk?item_ids=62,63 — so the
+ * dashboard warms its episode cache in one request instead of two per TV
+ * season. Grouped by item id; every requested id gets an entry, empty when
+ * it has no episodes, mirroring what the per-item endpoints return for it.
+ *
+ * MCU only: episodes.item_id references items.id, never other_universes.
+ */
+export async function handleGetWatchEpisodesBulk(request, env, user, url) {
+  const raw = url.searchParams.get("item_ids");
+  if (raw === null || raw.trim() === "") {
+    return error("item_ids must be a comma-separated list of positive integers", 400);
+  }
+
+  const parts = raw.split(",").map((p) => p.trim());
+  if (parts.length > EPISODES_BULK_MAX) {
+    return error(`item_ids may contain at most ${EPISODES_BULK_MAX} ids`, 400);
+  }
+  const ids = [];
+  for (const part of parts) {
+    // Digits only: Number() alone would accept "", "1e3", "0x10" or " 7 ".
+    const id = /^\d+$/.test(part) ? Number(part) : NaN;
+    if (!Number.isSafeInteger(id) || id < 1) {
+      return error(`item_ids: ${JSON.stringify(part)} is not a positive integer`, 400);
+    }
+    ids.push(id);
+  }
+  const unique = [...new Set(ids)];
+
+  const [episodeRows, statusRows] = await Promise.all([
+    selectWhereIdInChunked(
+      env,
+      "SELECT id, item_id, episode_number, title, runtime_min, is_estimate FROM episodes WHERE item_id IN",
+      unique
+    ),
+    selectWhereIdInChunked(
+      env,
+      `SELECT item_id, episode_id, status, updated_at FROM watch_status
+        WHERE user_id = ? AND source = 'mcu' AND episode_id != 0 AND item_id IN`,
+      unique,
+      [user.user_id]
+    ),
+  ]);
+
+  const byItem = {};
+  for (const id of unique) byItem[id] = { episodes: [], watch_status: [] };
+  for (const r of episodeRows) {
+    byItem[r.item_id].episodes.push({
+      id: r.id,
+      episode_number: r.episode_number,
+      title: r.title,
+      runtime_min: r.runtime_min,
+      is_estimate: r.is_estimate === 1,
+    });
+  }
+  for (const r of statusRows) {
+    byItem[r.item_id].watch_status.push({ episode_id: r.episode_id, status: r.status, updated_at: r.updated_at });
+  }
+  // Same order the per-item endpoints use: episode_number, then episode_id.
+  for (const entry of Object.values(byItem)) {
+    entry.episodes.sort((a, b) => a.episode_number - b.episode_number || a.id - b.id);
+    entry.watch_status.sort((a, b) => a.episode_id - b.episode_id);
+  }
+
+  return privateJson({ items: byItem });
+}
+
 /* --------------------------------------------------------------- watchlist */
 
 const WATCHLIST_SOURCES = SOURCES;
@@ -499,6 +595,21 @@ export async function handlePostWatchlist(request, env, user) {
       return error(`source must be one of: ${[...WATCHLIST_SOURCES].join(", ")}`, 400);
     }
     entries.push({ id, source });
+  }
+
+  // watchlist.item_id has had no foreign key since migration 0005 (one column
+  // now points at either table, chosen by source), so existence is checked
+  // here instead. Done before any write: one bad entry rejects the whole save.
+  const idsFor = (source) => [...new Set(entries.filter((e) => e.source === source).map((e) => e.id))];
+  const [mcuRows, otherRows] = await Promise.all([
+    selectWhereIdInChunked(env, "SELECT id FROM items WHERE id IN", idsFor("mcu")),
+    selectWhereIdInChunked(env, "SELECT id FROM other_universes WHERE id IN", idsFor("other")),
+  ]);
+  const known = { mcu: new Set(mcuRows.map((r) => r.id)), other: new Set(otherRows.map((r) => r.id)) };
+  for (const [i, e] of entries.entries()) {
+    if (!known[e.source].has(e.id)) {
+      return error(`items[${i}]: no ${e.source} item with item_id ${e.id}`, 400);
+    }
   }
 
   // The payload is the full intended watchlist, not a list of additions: rows

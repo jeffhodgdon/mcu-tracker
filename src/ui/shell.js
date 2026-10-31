@@ -257,12 +257,22 @@ async function loadEpisodeData(itemId) {
     apiGet("/api/watch/episodes?item_id=" + itemId),
   ]);
 
-  const episodes = (epRes.data && epRes.data.episodes) || [];
-  const statuses = new Map();
-  for (const row of (statusRes.data && statusRes.data.watch_status) || []) {
-    statuses.set(row.episode_id, row.status);
-  }
+  return cacheEpisodeData(
+    itemId,
+    (epRes.data && epRes.data.episodes) || [],
+    (statusRes.data && statusRes.data.watch_status) || []
+  );
+}
 
+/**
+ * Stores one MCU item's episodes and the user's episode-level status rows
+ * ({ episode_id, status }) in EPISODE_CACHE, and returns the entry. Shared by
+ * loadEpisodeData (one item, on expand) and the dashboard's bulk prefetch
+ * (/api/watch/episodes/bulk), so both build exactly the same entry shape.
+ */
+function cacheEpisodeData(itemId, episodes, statusRows) {
+  const statuses = new Map();
+  for (const row of statusRows) statuses.set(row.episode_id, row.status);
   const entry = { episodes: episodes, statuses: statuses };
   EPISODE_CACHE.set(episodeCacheKey("mcu", itemId), entry);
   return entry;
@@ -706,6 +716,7 @@ const RUNTIME_FNS = [
   cachedEpisodes,
   episodeProgressLabel,
   loadEpisodeData,
+  cacheEpisodeData,
   renderEpisodeRows,
   onEpisodeWatchToggle,
   apiPost,
