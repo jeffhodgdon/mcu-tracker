@@ -2,14 +2,14 @@
 -- Rows: 117 | estimate runtimes: 28 | runtime NULL: 11
 -- Partial release dates kept verbatim: 4 | release_date NULL: 2
 --
--- Upsert keyed on the explicit id so re-running is safe and never renumbers
--- items (watch_status.item_id points here). ON CONFLICT DO UPDATE is used
--- instead of INSERT OR REPLACE, which would delete-then-insert and take
--- dependent watch_status rows with it.
+-- FIRST-TIME SETUP ONLY. Inserts only when the items table is empty, so
+-- against a live DB this is a no-op: it never overwrites admin corrections
+-- and never brings back deleted items. Explicit ids keep item_id stable for
+-- watch_status, watchlist and episodes. Edit live data via the Admin page.
 
 INSERT INTO items
   (id, title, type, release_date, phase, runtime_min, notes, is_estimate)
-VALUES
+SELECT * FROM (VALUES
   (1, 'Iron Man', 'Film', '2008-05-02', 'Phase 1', 126, NULL, 0),
   (2, 'The Incredible Hulk', 'Film', '2008-06-13', 'Phase 1', 112, NULL, 0),
   (3, 'Iron Man 2', 'Film', '2010-05-07', 'Phase 1', 124, NULL, 0),
@@ -127,11 +127,5 @@ VALUES
   (115, 'Untitled Marvel Film', 'Film', '2029-00-01', 'TBD', NULL, 'UPCOMING; date held, untitled', 0),
   (116, 'X-Men (MCU reboot)', 'Film', NULL, 'TBD', NULL, 'UPCOMING; dir. Jake Schreier, no date announced', 0),
   (117, 'Wonder Man (Season 2)', 'TV Series', NULL, 'TBD', NULL, 'UPCOMING; renewed, no date announced', 0)
-ON CONFLICT(id) DO UPDATE SET
-  title = excluded.title,
-  type = excluded.type,
-  release_date = excluded.release_date,
-  phase = excluded.phase,
-  runtime_min = excluded.runtime_min,
-  notes = excluded.notes,
-  is_estimate = excluded.is_estimate;
+)
+WHERE NOT EXISTS (SELECT 1 FROM items);

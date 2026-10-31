@@ -209,7 +209,7 @@ export async function handleOtherUniverses(request, env) {
 // existing caller (release.js, chronological.js, dashboard.js) expects.
 export async function handleGetWatchStatus(request, env, user) {
   const { results } = await env.DB.prepare(
-    `SELECT item_id, source, status, episode_progress, updated_at
+    `SELECT item_id, source, status, updated_at
        FROM watch_status
       WHERE user_id = ? AND episode_id = 0
       ORDER BY source, item_id`
@@ -217,23 +217,7 @@ export async function handleGetWatchStatus(request, env, user) {
     .bind(user.user_id)
     .all();
 
-  return privateJson({
-    watch_status: results.map((r) => ({
-      ...r,
-      episode_progress: parseProgress(r.episode_progress),
-    })),
-  });
-}
-
-function parseProgress(raw) {
-  if (raw === null || raw === undefined) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // Stored value predates validation or was written by hand — surface it as
-    // raw text rather than failing the whole request.
-    return raw;
-  }
+  return privateJson({ watch_status: results });
 }
 
 export async function handlePutWatchStatus(request, env, user, itemId, source) {
@@ -244,71 +228,36 @@ export async function handlePutWatchStatus(request, env, user, itemId, source) {
     return error(`source must be one of: ${[...SOURCES].join(", ")}`, 400);
   }
 
+  // episode_progress was a free-form JSON blob from before per-episode
+  // tracking got its own watch_status rows (episode_id != 0, migration 0009).
+  // Nothing reads it any more, and accepting it let any caller store an
+  // unbounded value on every item, so it is refused outright. The column
+  // itself stays in the schema untouched.
+  if (Object.hasOwn(body, "episode_progress")) {
+    return error("episode_progress is no longer supported", 400);
+  }
+  if (!Object.hasOwn(body, "status")) return error("status is required", 400);
+  const status = String(body.status);
+  if (!WATCH_STATUSES.has(status)) {
+    return error(`status must be one of: ${[...WATCH_STATUSES].join(", ")}`, 400);
+  }
+
   const table = source === "other" ? "other_universes" : "items";
   const exists = await env.DB.prepare(`SELECT 1 AS ok FROM ${table} WHERE id = ?`)
     .bind(itemId)
     .first();
   if (!exists) return error("No such item", 404);
 
-  const hasStatus = Object.hasOwn(body, "status");
-  const hasProgress = Object.hasOwn(body, "episode_progress");
-  if (!hasStatus && !hasProgress) {
-    return error("Provide at least one of: status, episode_progress", 400);
-  }
-
-  let status;
-  if (hasStatus) {
-    status = String(body.status);
-    if (!WATCH_STATUSES.has(status)) {
-      return error(
-        `status must be one of: ${[...WATCH_STATUSES].join(", ")}`,
-        400
-      );
-    }
-  }
-
-  let progress;
-  if (hasProgress) {
-    const p = body.episode_progress;
-    if (p === null) {
-      progress = null;
-    } else if (typeof p === "object") {
-      progress = JSON.stringify(p);
-    } else {
-      return error("episode_progress must be a JSON object, array, or null", 400);
-    }
-  }
-
-  // A partial update must not clobber the field it did not mention, so the
-  // current row supplies the defaults for whatever the caller omitted.
-  const existing = await env.DB.prepare(
-    "SELECT status, episode_progress FROM watch_status WHERE user_id = ? AND item_id = ? AND source = ? AND episode_id = 0"
-  )
-    .bind(user.user_id, itemId, source)
-    .first();
-
-  const finalStatus = hasStatus ? status : existing?.status ?? "unwatched";
-  const finalProgress = hasProgress ? progress : existing?.episode_progress ?? null;
-
-  await env.DB.prepare(
-    `INSERT INTO watch_status (user_id, item_id, source, episode_id, status, episode_progress, updated_at)
-     VALUES (?, ?, ?, 0, ?, ?, datetime('now'))
-     ON CONFLICT(user_id, item_id, source, episode_id) DO UPDATE SET
-       status = excluded.status,
-       episode_progress = excluded.episode_progress,
-       updated_at = excluded.updated_at`
-  )
-    .bind(user.user_id, itemId, source, finalStatus, finalProgress)
-    .run();
+  await upsertWatchStatement(env, user.user_id, { itemId, source, episodeId: 0, status }).run();
 
   const row = await env.DB.prepare(
-    `SELECT item_id, source, status, episode_progress, updated_at
+    `SELECT item_id, source, status, updated_at
        FROM watch_status WHERE user_id = ? AND item_id = ? AND source = ? AND episode_id = 0`
   )
     .bind(user.user_id, itemId, source)
     .first();
 
-  return privateJson({ watch_status: { ...row, episode_progress: parseProgress(row.episode_progress) } });
+  return privateJson({ watch_status: row });
 }
 
 /* -------------------------------------------------------------- episodes */
@@ -413,7 +362,8 @@ export async function handlePostWatch(request, env, user) {
   return privateJson({ watch_status: row });
 }
 
-// Comfortably above the largest season in the catalogue (10 episodes), and
+// Comfortably above the largest season in the catalogue (10 episodes, plus
+// the season-level row a season status change sends alongside them), and
 // keeps each bulk IN (...) lookup below within D1's 100-bound-parameter limit.
 const WATCH_BATCH_MAX = 100;
 
@@ -427,8 +377,9 @@ async function selectWhereIdIn(env, sql, ids) {
 }
 
 /**
- * Many watch-status changes in one request — e.g. "mark all episodes
- * watched" — validated per entry exactly like POST /api/watch, then written
+ * Many watch-status changes in one request — e.g. a season status change,
+ * which sends the season-level row (episode_id 0) together with every one of
+ * its episodes — validated per entry exactly like POST /api/watch, then written
  * in a single D1 batch (one implicit transaction), so the request either
  * applies every update or none of them. Any invalid entry rejects the whole
  * batch, with its index in the error message.
@@ -846,9 +797,9 @@ export async function handleAdminReplaceEpisodes(request, env, itemId) {
     .bind(itemId)
     .all();
 
-  // The table has no UNIQUE(item_id, episode_number), so legacy duplicates
-  // are possible: the oldest row for a number is the one kept and updated,
-  // any later duplicates are treated as removed.
+  // UNIQUE(item_id, episode_number) (migration 0015) rules out duplicates
+  // now; this still keeps the oldest row for a number and treats any later
+  // one as removed, so it stays correct on a DB that predates the index.
   const idByNumber = new Map();
   const removedIds = [];
   for (const row of current) {

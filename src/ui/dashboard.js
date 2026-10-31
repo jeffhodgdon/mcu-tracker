@@ -253,10 +253,13 @@ function dashboardMain() {
   // have no cache entry, so they fall back to counting their full runtime.
   //
   // Returns null when there's no episode data to work from (falls back to
-  // season-level logic), or { any, all, remainingMinutes } once at least one
-  // episode has been checked off.
-  function episodeProgress(itemId) {
-    const cached = EPISODE_CACHE.get(itemId);
+  // season-level logic), or { all, remainingMinutes } once at least one
+  // episode has been checked off. Looked up by source as well as id —
+  // cachedEpisodes() returns null for anything but "mcu", so an Other
+  // Universes entry sharing an MCU season's numeric id never picks up that
+  // season's episodes.
+  function episodeProgress(source, itemId) {
+    const cached = cachedEpisodes(source, itemId);
     if (!cached || !cached.episodes.length) return null;
 
     let watchedCount = 0;
@@ -288,7 +291,7 @@ function dashboardMain() {
 
       total++;
       const status = state.statuses.get(wlKey(entry.source, entry.item_id)) || "unwatched";
-      const progress = episodeProgress(entry.item_id);
+      const progress = episodeProgress(entry.source, entry.item_id);
 
       // Every episode checked counts the item as watched for the stat card
       // even if the season-level status control hasn't itself been flipped.
@@ -803,7 +806,7 @@ function dashboardMain() {
   // showing whatever it last displayed, so unchecking every episode back to
   // zero never brought the runtime back to the full season total.
   function updateSeasonRowRuntime(itemId) {
-    const cached = EPISODE_CACHE.get(Number(itemId));
+    const cached = cachedEpisodes("mcu", itemId);
     if (!cached || !cached.episodes.length) return;
 
     const cell = $("watchlist-rows").querySelector(
@@ -836,7 +839,7 @@ function dashboardMain() {
   // that has never been expanded — e.g. right after the background prefetch
   // below populates the cache, with no episode rows in the DOM yet.
   function updateSeasonRowRuntimeFromCache(itemId) {
-    const cached = EPISODE_CACHE.get(Number(itemId));
+    const cached = cachedEpisodes("mcu", itemId);
     if (!cached || !cached.episodes.length) return;
 
     let remainingMinutes = 0;

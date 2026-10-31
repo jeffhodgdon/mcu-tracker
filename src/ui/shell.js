@@ -142,7 +142,7 @@ function showError(message) {
  * class="episode-rows" data-episode-rows="<itemId>">` container row that
  * episode rows get injected into on first expand. Call
  * `wireEpisodeToggles(container, colspan)` once after rendering rows, and
- * `episodeMarkAll(itemId, watched)` from a season-level "mark all" control.
+ * `saveSeasonStatus(itemId, status)` from a season-level status control.
  */
 function episodeToggleHtml(itemId) {
   return (
@@ -219,8 +219,27 @@ function episodeLoadingHtml() {
   return '<div class="episode-row episode-no-data"><span class="muted">Loading episodes…</span></div>';
 }
 
+/**
+ * EPISODE_CACHE keys carry the source as well as the id: items.id and
+ * other_universes.id are independent sequences that overlap, so a bare id
+ * would let an Other Universes entry read an MCU season's episodes.
+ */
+function episodeCacheKey(source, itemId) {
+  return source + ":" + Number(itemId);
+}
+
+/**
+ * The cached { episodes, statuses } for an item, or null. Episodes only exist
+ * for MCU items (episodes.item_id references items.id), so any other source
+ * always gets null, and callers fall back to the item's own status/runtime.
+ */
+function cachedEpisodes(source, itemId) {
+  if (source !== "mcu") return null;
+  return EPISODE_CACHE.get(episodeCacheKey(source, itemId)) || null;
+}
+
 function episodeProgressLabel(itemId) {
-  const cached = EPISODE_CACHE.get(itemId);
+  const cached = cachedEpisodes("mcu", itemId);
   if (!cached) return null;
   const watchedCount = cached.episodes.filter(function (ep) {
     return cached.statuses.get(ep.id) === "watched";
@@ -228,8 +247,10 @@ function episodeProgressLabel(itemId) {
   return "(" + watchedCount + "/" + cached.episodes.length + " watched)";
 }
 
+/** MCU items only: /api/items/:id/episodes is keyed on items.id. */
 async function loadEpisodeData(itemId) {
-  if (EPISODE_CACHE.has(itemId)) return EPISODE_CACHE.get(itemId);
+  const cached = cachedEpisodes("mcu", itemId);
+  if (cached) return cached;
 
   const [epRes, statusRes] = await Promise.all([
     apiGet("/api/items/" + itemId + "/episodes"),
@@ -243,7 +264,7 @@ async function loadEpisodeData(itemId) {
   }
 
   const entry = { episodes: episodes, statuses: statuses };
-  EPISODE_CACHE.set(itemId, entry);
+  EPISODE_CACHE.set(episodeCacheKey("mcu", itemId), entry);
   return entry;
 }
 
@@ -272,7 +293,7 @@ async function onEpisodeWatchToggle(ev, onProgressChange) {
   const itemId = Number(cb.getAttribute("data-item-id"));
   const episodeId = Number(cb.getAttribute("data-episode-id"));
   const next = cb.checked ? "watched" : "unwatched";
-  const data = EPISODE_CACHE.get(itemId);
+  const data = cachedEpisodes("mcu", itemId);
   const previous = data ? data.statuses.get(episodeId) || "unwatched" : "unwatched";
 
   cb.disabled = true;
@@ -308,23 +329,38 @@ async function apiPost(path, body) {
 }
 
 /**
- * Marks every episode of an item watched/unwatched, mirroring a season-level
- * "mark all". One request for the whole season, applied server-side as a
- * single D1 batch — so it either fully succeeds or throws with nothing
- * changed, rather than leaving the season half-marked partway through.
+ * Saves a season's own status and, for watched/unwatched, marks every one of
+ * its episodes to match. The season-level row (episode_id 0) travels in the
+ * same POST /api/watch/batch as the episode rows, applied server-side as a
+ * single D1 batch — so the season and its episodes either all change or none
+ * do, and they can never disagree after a failed save. Rewatch/skip carry no
+ * per-episode meaning, so those send the season row alone.
+ *
+ * Throws with nothing changed (server, EPISODE_CACHE or DOM) on failure;
+ * episode state is only updated here once the server has confirmed.
  */
-async function episodeMarkAll(itemId, watched) {
-  const data = await loadEpisodeData(itemId);
-  if (!data.episodes.length) return;
-  const next = watched ? "watched" : "unwatched";
+async function saveSeasonStatus(itemId, status) {
+  const markEpisodes = status === "watched" || status === "unwatched";
+  const data = markEpisodes ? await loadEpisodeData(itemId) : null;
+  const episodes = data ? data.episodes : [];
+
   await apiPost("/api/watch/batch", {
-    updates: data.episodes.map(function (ep) {
-      return { item_id: itemId, episode_id: ep.id, status: next };
-    }),
+    updates: [{ item_id: itemId, episode_id: 0, status: status }].concat(
+      episodes.map(function (ep) {
+        return { item_id: itemId, episode_id: ep.id, status: status };
+      })
+    ),
   });
-  for (const ep of data.episodes) data.statuses.set(ep.id, next);
-  const cell = document.querySelector('tr[data-episode-rows="' + itemId + '"] td');
-  if (cell && !cell.querySelector(".episode-no-data")) {
+
+  if (!episodes.length) return;
+  const watched = status === "watched";
+  for (const ep of episodes) data.statuses.set(ep.id, status);
+  // Desktop episode rows live in a sibling <tr>, mobile ones in a nested
+  // .mobile-episode-bubble div (release.js/chronological.js) — update both.
+  for (const cell of document.querySelectorAll(
+    'tr[data-episode-rows="' + itemId + '"] td, [data-mobile-episode-rows="' + itemId + '"]'
+  )) {
+    if (cell.querySelector(".episode-no-data")) continue;
     for (const row of cell.querySelectorAll(".episode-row")) {
       row.classList.toggle("watched", watched);
       const cb = row.querySelector(".episode-watch-cb");
@@ -666,12 +702,14 @@ const RUNTIME_FNS = [
   episodeRowHtml,
   episodeNoDataHtml,
   episodeLoadingHtml,
+  episodeCacheKey,
+  cachedEpisodes,
   episodeProgressLabel,
   loadEpisodeData,
   renderEpisodeRows,
   onEpisodeWatchToggle,
   apiPost,
-  episodeMarkAll,
+  saveSeasonStatus,
   wireEpisodeToggles,
   onEpisodeToggleClick,
 ].map(reflect);
@@ -679,7 +717,7 @@ const RUNTIME_FNS = [
 // Not one of RUNTIME_FNS's reflected functions (those are serialized
 // independently via toString() and share no closure once reflected) — this
 // module-level cache has to be its own statement in the generated script so
-// loadEpisodeData/renderEpisodeRows/episodeMarkAll can all see the same Map.
+// loadEpisodeData/renderEpisodeRows/saveSeasonStatus can all see the same Map.
 const EPISODE_CACHE_DECL = "var EPISODE_CACHE = new Map();";
 
 // A plain string, not a reflected function, for the same reason as

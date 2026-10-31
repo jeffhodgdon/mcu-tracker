@@ -668,13 +668,12 @@ function chronologicalMain() {
 
     select.disabled = true;
     try {
-      await apiPut("/api/watch-status/" + itemId, { status: next });
+      // One all-or-nothing request for the season row and its episodes; local
+      // state only changes once it has succeeded.
+      await saveSeasonStatus(itemId, next);
       state.statuses.set(itemId, next);
       syncItemRow(itemId, next);
-      if (next === "watched" || next === "unwatched") {
-        await episodeMarkAll(itemId, next === "watched");
-        refreshSeasonProgress(itemId);
-      }
+      refreshSeasonProgress(itemId);
       updateSubtitle();
     } catch (e) {
       select.value = previous;

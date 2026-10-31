@@ -65,8 +65,12 @@ const BODY = `
       <p><strong>Watch status tracking</strong><br>
       Every film/season has a status control (Unwatched, Watched, Rewatch,
       Skip). TV seasons also track individual episodes: expand a season&#39;s
-      arrow to check off episodes one at a time; the season-level status
-      updates to match once every episode is checked.</p>
+      arrow to check off episodes one at a time. On Release Order and
+      Chronological, setting a season to Watched or Unwatched marks all of its
+      episodes the same way. Checking off episodes never changes the
+      season&#39;s own status, so set that yourself when you finish; the
+      Dashboard stats already count a season as watched once every episode is
+      checked.</p>
 
       <p><strong>Build Watch List modal</strong><br>
       Opened from the Dashboard, it lists the full catalogue grouped by
