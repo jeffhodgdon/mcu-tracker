@@ -385,7 +385,7 @@ function dashboardMain() {
       $("countdown-headline").textContent = "Today";
       $("countdown-note").textContent = label + " · " + displayDate(target);
     } else {
-      $("countdown-headline").textContent = Math.abs(days) + " days ago";
+      $("countdown-headline").textContent = Math.abs(days) + (days === -1 ? " day ago" : " days ago");
       $("countdown-note").textContent = label + " · " + displayDate(target);
     }
   }
@@ -1398,29 +1398,41 @@ function dashboardMain() {
     }
   }
 
+  // Every key the picker currently renders a checkbox for, across all groups
+  // (media types, Consolidated, and Other Universes when it is included) —
+  // the picker's own filters (released-only, the Other Universes toggle)
+  // decide this, so quick-select can never tick something you can't see.
+  function shownPickerKeys() {
+    const keys = new Set();
+    for (const cb of $("watchlist-picker").querySelectorAll("input[data-key]")) {
+      keys.add(cb.getAttribute("data-key"));
+    }
+    return keys;
+  }
+
+  // Each button replaces the selection with released items the picker
+  // shows. Released matters on its own: the media-type and Other Universes
+  // groups only list released titles, but the Consolidated section lists
+  // every franchise member, so "shown" alone would still tick unreleased
+  // ones from there.
+  //   All             = every shown, released item
+  //   Sacred Timeline = the same, MCU only (source "mcu", so crossover
+  //                     titles count; no Other Universes rows)
+  //   Films / Shows   = shown, released MCU items of those types
   function applyQuickSelect(kind) {
-    const includeOther = $("watchlist-include-other").checked;
     markActiveQuickSelect(kind);
 
     const next = new Set();
+    for (const key of shownPickerKeys()) {
+      const idx = key.indexOf(":");
+      const source = key.slice(0, idx);
+      const item = findItem(source, Number(key.slice(idx + 1)));
+      if (!item || !isPastOrPresent(item)) continue;
 
-    if (kind === "all") {
-      for (const item of state.items) next.add(wlKey("mcu", item.id));
-      if (includeOther) {
-        for (const item of state.otherItems) {
-          if (item.source !== "mcu") next.add(wlKey("other", item.id));
-        }
-      }
-    } else if (kind === "films") {
-      for (const item of state.items) {
-        if (item.type === "Film") next.add(wlKey("mcu", item.id));
-      }
-    } else if (kind === "shows") {
-      for (const item of state.items) {
-        if (TV_TYPES.indexOf(item.type) !== -1) next.add(wlKey("mcu", item.id));
-      }
-    } else if (kind === "sacred") {
-      for (const item of state.items) next.add(wlKey("mcu", item.id));
+      if (kind === "all") next.add(key);
+      else if (kind === "sacred" && source === "mcu") next.add(key);
+      else if (kind === "films" && item && item.type === "Film") next.add(key);
+      else if (kind === "shows" && item && TV_TYPES.indexOf(item.type) !== -1) next.add(key);
     }
 
     state.pickerChecked = next;

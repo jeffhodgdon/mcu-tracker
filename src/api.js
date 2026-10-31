@@ -921,7 +921,15 @@ export async function handleAdminReplaceEpisodes(request, env, itemId) {
     }
   }
 
+  // A removed episode's watch_status rows go in the same batch, so no user is
+  // left holding marks for an episode that no longer exists (and that a
+  // later episode could never pick up, since ids are never reused).
   const statements = [
+    ...removedIds.map((id) =>
+      env.DB.prepare(
+        "DELETE FROM watch_status WHERE item_id = ? AND source = 'mcu' AND episode_id = ?"
+      ).bind(itemId, id)
+    ),
     ...removedIds.map((id) => env.DB.prepare("DELETE FROM episodes WHERE id = ?").bind(id)),
     ...parsed.map((ep) => {
       const id = idByNumber.get(ep.episode_number);
@@ -979,21 +987,30 @@ export async function handleAdminListItems(request, env) {
  * itself (edit path only; create has no id yet), since it will get the new
  * value in the caller's own INSERT/UPDATE and must not also be caught by
  * this shift.
+ *
+ * Returns a statement (or null when there is no order to make room for) for
+ * the caller to put in one env.DB.batch ahead of its own INSERT/UPDATE, so
+ * the shift and the item write succeed or fail together. The "is the slot
+ * taken?" check is part of the same statement rather than a separate read
+ * beforehand, so nothing can change between checking and shifting.
  */
-async function shiftChronoOrder(env, table, newOrder, excludeId) {
-  if (newOrder === null || newOrder === undefined) return;
-  const existing = await env.DB.prepare(
-    `SELECT 1 AS ok FROM ${table} WHERE chrono_order = ? AND id != ?`
-  )
-    .bind(newOrder, excludeId ?? -1)
-    .first();
-  if (!existing) return;
+function shiftChronoOrderStatement(env, table, newOrder, excludeId) {
+  if (newOrder === null || newOrder === undefined) return null;
+  const exclude = excludeId ?? -1;
+  return env.DB.prepare(
+    `UPDATE ${table} SET chrono_order = chrono_order + 1
+      WHERE chrono_order >= ? AND id != ?
+        AND EXISTS (SELECT 1 FROM ${table} WHERE chrono_order = ? AND id != ?)`
+  ).bind(newOrder, exclude, newOrder, exclude);
+}
 
-  await env.DB.prepare(
-    `UPDATE ${table} SET chrono_order = chrono_order + 1 WHERE chrono_order >= ? AND id != ?`
-  )
-    .bind(newOrder, excludeId ?? -1)
-    .run();
+/**
+ * Runs an optional chrono shift and the item write as one D1 batch and
+ * returns the item write's result (the last statement's).
+ */
+async function batchWithShift(env, shift, write) {
+  const results = await env.DB.batch(shift ? [shift, write] : [write]);
+  return results[results.length - 1];
 }
 
 /** Inserts a new MCU catalogue row. Required: title, type. Returns { id, title }. */
@@ -1007,17 +1024,20 @@ export async function handleAdminCreateItem(request, env) {
   const values = fields.map((field) => coerceAdminField(field, body[field]));
 
   const chronoOrderIdx = fields.indexOf("chrono_order");
-  if (chronoOrderIdx !== -1) {
-    await shiftChronoOrder(env, "items", values[chronoOrderIdx], null);
-  }
+  const shift =
+    chronoOrderIdx === -1 ? null : shiftChronoOrderStatement(env, "items", values[chronoOrderIdx], null);
 
   const columns = ["title", "type", ...fields];
   const placeholders = columns.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `INSERT INTO items (${columns.join(", ")}) VALUES (${placeholders})`
-  )
-    .bind(title, type, ...values)
-    .run();
+  const result = await batchWithShift(
+    env,
+    shift,
+    env.DB.prepare(`INSERT INTO items (${columns.join(", ")}) VALUES (${placeholders})`).bind(
+      title,
+      type,
+      ...values
+    )
+  );
 
   return privateJson({ id: result.meta.last_row_id, title }, 201);
 }
@@ -1035,17 +1055,22 @@ export async function handleAdminCreateOtherUniverse(request, env) {
   const values = fields.map((field) => coerceAdminField(field, body[field]));
 
   const chronoOrderIdx = fields.indexOf("chrono_order");
-  if (chronoOrderIdx !== -1) {
-    await shiftChronoOrder(env, "other_universes", values[chronoOrderIdx], null);
-  }
+  const shift =
+    chronoOrderIdx === -1
+      ? null
+      : shiftChronoOrderStatement(env, "other_universes", values[chronoOrderIdx], null);
 
   const columns = ["title", "universe", ...fields];
   const placeholders = columns.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `INSERT INTO other_universes (${columns.join(", ")}) VALUES (${placeholders})`
-  )
-    .bind(title, universe, ...values)
-    .run();
+  const result = await batchWithShift(
+    env,
+    shift,
+    env.DB.prepare(`INSERT INTO other_universes (${columns.join(", ")}) VALUES (${placeholders})`).bind(
+      title,
+      universe,
+      ...values
+    )
+  );
 
   return privateJson({ id: result.meta.last_row_id, title }, 201);
 }
@@ -1057,6 +1082,9 @@ export async function handleAdminDeleteItem(request, env, itemId) {
   const exists = await env.DB.prepare("SELECT 1 AS ok FROM items WHERE id = ?").bind(itemId).first();
   if (!exists) return error("No such item", 404);
 
+  // The watch_status delete also covers every per-episode row for this item:
+  // those carry the season's item_id (episode_id != 0), so one statement
+  // clears season- and episode-level marks before the episodes themselves go.
   await env.DB.batch([
     env.DB.prepare("DELETE FROM watch_status WHERE item_id = ? AND source = 'mcu'").bind(itemId),
     env.DB.prepare("DELETE FROM watchlist WHERE item_id = ? AND source = 'mcu'").bind(itemId),
@@ -1112,14 +1140,17 @@ export async function handleAdminPatchItem(request, env, itemId, source) {
   // the item unchanged (e.g. after an episode edit, see onEpisodeSave in
   // admin.js) must not bump every row below it on every save.
   const chronoOrderIdx = fields.indexOf("chrono_order");
-  if (chronoOrderIdx !== -1 && values[chronoOrderIdx] !== exists.chrono_order) {
-    await shiftChronoOrder(env, table, values[chronoOrderIdx], itemId);
-  }
+  const shift =
+    chronoOrderIdx !== -1 && values[chronoOrderIdx] !== exists.chrono_order
+      ? shiftChronoOrderStatement(env, table, values[chronoOrderIdx], itemId)
+      : null;
 
   const setClause = fields.map((f) => `${f} = ?`).join(", ");
-  await env.DB.prepare(`UPDATE ${table} SET ${setClause} WHERE id = ?`)
-    .bind(...values, itemId)
-    .run();
+  await batchWithShift(
+    env,
+    shift,
+    env.DB.prepare(`UPDATE ${table} SET ${setClause} WHERE id = ?`).bind(...values, itemId)
+  );
 
   if (isOther) {
     const row = await env.DB.prepare(

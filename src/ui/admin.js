@@ -858,7 +858,8 @@ function adminMain() {
           await deleteItem(state.editingId, state.editingSource);
           $("edit-form").classList.add("hide");
           state.editingId = null;
-          showAdminSuccess(esc(deletedTitle) + " deleted.");
+          // showAdminSuccess sets textContent, so the title must not be escaped.
+          showAdminSuccess(deletedTitle + " deleted.");
           await loadItems();
         } catch (e) {
           showError("Could not delete: " + e.message);
@@ -951,8 +952,9 @@ function adminMain() {
         const id = Number(cell.getAttribute("data-id"));
         const source = cell.getAttribute("data-source") || "mcu";
         try {
+          const deleted = findItem(id, source);
           await deleteItem(id, source);
-          showAdminSuccess(esc(findItem(id, source) && findItem(id, source).title) + " deleted.");
+          showAdminSuccess((deleted ? deleted.title : "Item") + " deleted.");
           await loadItems();
         } catch (e) {
           showError("Could not delete: " + e.message);

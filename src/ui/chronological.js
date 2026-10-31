@@ -837,11 +837,15 @@ function chronologicalMain() {
     });
 
     try {
-      const items = await apiGet("/api/items");
+      // Independent requests, so they run side by side rather than the
+      // watch-status fetch waiting on the catalogue.
+      const [items, watch] = await Promise.all([
+        apiGet("/api/items"),
+        state.signedIn ? apiGet("/api/watch-status") : null,
+      ]);
       state.items = items.data.items;
 
-      if (state.signedIn) {
-        const watch = await apiGet("/api/watch-status");
+      if (watch) {
         // /api/watch-status returns rows for every source (mcu and other),
         // not just this page's — an other_universes item can carry the same
         // numeric id as an MCU item (the two are independent id spaces), so

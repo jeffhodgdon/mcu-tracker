@@ -90,6 +90,35 @@ function isAdmin(user, env) {
 }
 
 /**
+ * Every page is self-contained: one inline <script> (the shell runtime plus
+ * the page's main function, serialized by shell.js's renderPage) and one
+ * inline <style>, with style="" attributes throughout the markup and in HTML
+ * the scripts inject. Nothing is loaded from another origin — no CDN, no web
+ * fonts. The Ko-fi links and the Google sign-in redirect are top-level
+ * navigations, which CSP does not restrict; Google's token/userinfo calls and
+ * the n8n webhook are made by the Worker, not the browser.
+ *
+ * So 'unsafe-inline' is needed for scripts and styles. Hashing the script
+ * instead would mean computing a per-page digest at render time and setting
+ * the header per page rather than here; the policy still forbids every
+ * external script, style, connection, plugin, <base> rewrite, cross-origin
+ * form post and framing.
+ */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self'",
+  "connect-src 'self'",
+  "font-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+/**
  * Baseline hardening headers applied to every response this Worker returns,
  * regardless of path or content type — added centrally here rather than in
  * each individual handler so nothing can accidentally ship without them.
@@ -103,6 +132,9 @@ const SECURITY_HEADERS = {
   // filter side-channels), so modern guidance is to explicitly disable it
   // rather than tune it — "0" turns it off outright.
   "x-xss-protection": "0",
+  // HTTPS only, for a year, on this host and every subdomain under it.
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "content-security-policy": CONTENT_SECURITY_POLICY,
 };
 
 function withSecurityHeaders(response) {
